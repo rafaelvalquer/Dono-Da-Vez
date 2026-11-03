@@ -159,6 +159,9 @@ fun MapScreen(
                 true
             }
             m.setStyle(baseStyle(c.config)) { s ->
+                // O mapa-base possui POIs que não pertencem ao catálogo do jogo.
+                // Mantemos as ruas e os edifícios; os imóveis compráveis vêm de dv-*.
+                MapBaseStyleCleaner.hideUnrelatedPois(s)
                 MapLayers.install(context, s, c.game.profile()?.avatarId)
                 style = s
             }
