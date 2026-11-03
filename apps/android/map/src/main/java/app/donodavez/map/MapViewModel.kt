@@ -91,7 +91,7 @@ class MapViewModel(private val c: AppContainer) : ViewModel() {
             return
         }
         val boot = c.game.bootstrap.filterNotNull().first()
-        val center = boot.regions.firstOrNull { CityMapBounds.contains(it.center.lat, it.center.lon) }?.center
+        val center = boot.regions.firstOrNull { it.center?.let { center -> CityMapBounds.contains(center.lat, center.lon) } == true }?.center
         _camera.value = CameraTarget(center?.lat ?: CityMapBounds.CENTER_LAT,
             center?.lon ?: CityMapBounds.CENTER_LON, DEFAULT_ZOOM, animate = false)
     }
