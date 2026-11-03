@@ -85,6 +85,7 @@ import kotlinx.serialization.json.jsonObject
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.Style
 import kotlin.math.roundToInt
@@ -122,8 +123,13 @@ fun MapScreen(
 
     LaunchedEffect(mapView) {
         mapView.getMapAsync { m ->
-            m.setMinZoomPreference(11.0)
-            m.setMaxZoomPreference(19.5)
+            m.setMinZoomPreference(CityMapBounds.MIN_ZOOM)
+            m.setMaxZoomPreference(CityMapBounds.MAX_ZOOM)
+            // Limita a navegação ao entorno do município; o servidor delimita os imóveis publicados.
+            m.setLatLngBoundsForCameraTarget(LatLngBounds.Builder()
+                .include(LatLng(CityMapBounds.NORTH, CityMapBounds.WEST))
+                .include(LatLng(CityMapBounds.SOUTH, CityMapBounds.EAST))
+                .build())
             m.uiSettings.isCompassEnabled = true
             m.uiSettings.isTiltGesturesEnabled = true
             m.uiSettings.isAttributionEnabled = true
@@ -338,7 +344,7 @@ private fun MapBanners(
                 if (ui.areaTooLarge) Banner(ui.error, icon = Icons.Filled.ZoomIn)
                 else Banner(ui.error, action = "Tentar de novo", onAction = vm::retry)
             }
-            data?.truncated == true -> add { Banner("Muitos imóveis nesta área: aproxime o mapa para ver todos.", icon = Icons.Filled.ZoomIn) }
+            data?.truncated == true -> add { Banner("Mostrando parte dos imóveis. Aproxime o mapa para ver mais.", icon = Icons.Filled.ZoomIn) }
         }
     }
     banners.take(2).forEach { it() }
