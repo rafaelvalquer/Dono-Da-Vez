@@ -9,6 +9,11 @@ Itens incertos ou sem acesso ficam indisponíveis até revisão.
 
 No Android, localDebug usa OpenFreeMap Bright (tiles vetoriais, ruas e quadras reais,
 internet obrigatória) com sobreposição de imóveis coloridos, contornos e extrusões 3D.
+Os nomes e os ícones de comércios, estacionamentos e demais POIs do mapa-base são ocultados
+ao carregar o estilo; não são propriedades compráveis e confundiam os jogadores.
+A regra só oculta símbolos de POI do provedor, preservando ruas, nomes das vias,
+edificações e todas as camadas próprias do jogo (dv-*), incluindo avatar e imóveis.
+Esta limpeza é apenas visual e não modifica a base de dados do OpenStreetMap nem o Supabase.
 Não utiliza tiles de openstreetmap.org. A atribuição OSM/OpenMapTiles deve permanecer visível.
 É possível substituir o estilo com a propriedade Gradle dvLocalMapStyleUrl.
 
