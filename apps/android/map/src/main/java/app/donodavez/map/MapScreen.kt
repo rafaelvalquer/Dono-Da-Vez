@@ -171,7 +171,8 @@ fun MapScreen(
         val m = map ?: return@LaunchedEffect
         val t = camera ?: return@LaunchedEffect
         val pos = CameraPosition.Builder(m.cameraPosition)
-            .target(LatLng(t.lat, t.lon))
+            .target(LatLng(t.lat.coerceIn(CityMapBounds.SOUTH, CityMapBounds.NORTH),
+                t.lon.coerceIn(CityMapBounds.WEST, CityMapBounds.EAST)))
             .apply { t.zoom?.let { zoom(it) } }
             .tilt(if (ui.topView) 0.0 else TILT)
             .build()
@@ -238,6 +239,18 @@ fun MapScreen(
                         label = { Text(s.label) },
                         leadingIcon = { Icon(s.icon, contentDescription = null, tint = s.color, modifier = Modifier.size(18.dp)) },
                     )
+                }
+            }
+            Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
+                shape = RoundedCornerShape(12.dp)) {
+                Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Icon(Icons.Filled.Map, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp))
+                    Text("SÃO PAULO  ·  EXPLORE E COMPRE",
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
                 }
             }
             if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
