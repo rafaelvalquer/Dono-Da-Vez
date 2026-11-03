@@ -37,7 +37,7 @@ def test_ibge_geojson_plain_and_gzip():
     raw = json.dumps(sample).encode("utf-8")
     assert decode_ibge_geojson(raw) == sample
     assert decode_ibge_geojson(gzip.compress(raw)) == sample
-    assert decode_ibge_geojson(b"\\xef\\xbb\\xbf" + raw) == sample
+    assert decode_ibge_geojson(bytes([0xEF, 0xBB, 0xBF]) + raw) == sample
 
 
 def test_ibge_download_accepts_gzip_response_without_content_encoding(monkeypatch, tmp_path):
