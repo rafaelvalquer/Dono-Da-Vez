@@ -95,8 +95,8 @@ class MapRepository(private val c: AppContainer) {
     }
 
     companion object {
-        const val PAGE_SIZE = 500
-        const val MAX_PAGES = 3
+        const val PAGE_SIZE = 250
+        const val MAX_PAGES = 2
         const val CLUSTER_ZOOM = 15.0
         private const val CACHE_TTL_MS = 7L * 24 * 3600 * 1000
     }
