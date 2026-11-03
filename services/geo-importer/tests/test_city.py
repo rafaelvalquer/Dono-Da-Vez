@@ -1,11 +1,14 @@
 """A partição precisa ser determinística e nunca exceder o limite de 50 km²."""
 from __future__ import annotations
 
+import gzip
+import json
+
 import pytest
 from shapely.geometry import box
 from shapely.ops import unary_union
 
-from dv_importer.city import split_city
+from dv_importer.city import decode_ibge_geojson, download_boundary, split_city
 from dv_importer.geometry import LocalProjection
 
 
@@ -26,3 +29,34 @@ def test_split_city_cells_are_bounded_and_cover_input():
 def test_rejects_oversized_cells():
     with pytest.raises(ValueError):
         split_city(box(-46.7, -23.6, -46.6, -23.5), cell_meters=10000)
+
+
+def test_ibge_geojson_plain_and_gzip():
+    sample = {"type": "Polygon", "coordinates": [[[-46.7, -23.5], [-46.6, -23.5],
+                                                      [-46.6, -23.6], [-46.7, -23.5]]]}
+    raw = json.dumps(sample).encode("utf-8")
+    assert decode_ibge_geojson(raw) == sample
+    assert decode_ibge_geojson(gzip.compress(raw)) == sample
+    assert decode_ibge_geojson(b"\\xef\\xbb\\xbf" + raw) == sample
+
+
+def test_ibge_download_accepts_gzip_response_without_content_encoding(monkeypatch, tmp_path):
+    sample = {"type": "Polygon", "coordinates": [[[-46.7, -23.5], [-46.6, -23.5],
+                                                      [-46.6, -23.6], [-46.7, -23.5]]]}
+    compressed = gzip.compress(json.dumps(sample).encode("utf-8"))
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self, count):
+            return compressed
+
+    monkeypatch.setattr("dv_importer.city.urllib.request.urlopen", lambda *a, **k: FakeResponse())
+    monkeypatch.setattr("dv_importer.city.load_city_boundary", lambda path: None)
+    path = tmp_path / "sao-paulo.geojson"
+    assert download_boundary(path) == path
+    assert json.loads(path.read_text(encoding="utf-8")) == sample
