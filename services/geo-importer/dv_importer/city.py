@@ -53,7 +53,7 @@ def decode_ibge_geojson(payload: bytes) -> dict:
     servidores enviam o corpo gzip mesmo sem o cabeçalho Content-Encoding.
     Identificar a assinatura (1f 8b) funciona nos dois cenários.
     """
-    if payload.startswith(b"\\x1f\\x8b"):
+    if payload.startswith(b"\x1f\x8b"):
         payload = gzip.decompress(payload)
     if len(payload) > MAX_IBGE_GEOJSON_BYTES:
         raise ValueError("GeoJSON do IBGE excede 48 MiB descompactados")
