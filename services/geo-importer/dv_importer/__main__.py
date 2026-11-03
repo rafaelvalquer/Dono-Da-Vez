@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 from .pipeline import ImportArgs, analyze, run_import
+from .city import OSM_URL, run_city
 
 
 def _coverage(args: argparse.Namespace) -> int:
@@ -52,6 +53,18 @@ def _import(args: argparse.Namespace) -> int:
     return 0
 
 
+def _city(args: argparse.Namespace) -> int:
+    result = run_city(
+        db_url=os.environ.get("DV_IMPORTER_DB_URL"),
+        boundary=Path(args.boundary) if args.boundary else None,
+        pbf=Path(args.pbf) if args.pbf else None,
+        url=args.url, workdir=Path(args.workdir), max_cells=args.max_cells,
+        dry_run=args.dry_run, publish=not args.no_publish,
+    )
+    print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+    return 1 if result.get("failed") else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","msg":"%(message)s"}')
     p = argparse.ArgumentParser(prog="dv-geo-importer")
@@ -72,6 +85,16 @@ def main(argv: list[str] | None = None) -> int:
     cov.add_argument("--region-geojson", required=True)
     cov.add_argument("--out", help="diretório para coverage.json e properties.csv")
     cov.set_defaults(fn=_coverage)
+
+    city = sub.add_parser("import-city", help="gera células do município de São Paulo e importa edificações OSM")
+    city.add_argument("--boundary", help="GeoJSON municipal oficial previamente baixado (sem isso: IBGE)")
+    city.add_argument("--pbf", help="extrato Sudeste já baixado (sem isso: Geofabrik)")
+    city.add_argument("--url", default=OSM_URL)
+    city.add_argument("--workdir", default="/data/sp-city")
+    city.add_argument("--max-cells", type=int, help="executa só N células para homologação")
+    city.add_argument("--dry-run", action="store_true", help="somente gera os polígonos de trabalho")
+    city.add_argument("--no-publish", action="store_true")
+    city.set_defaults(fn=_city)
 
     args = p.parse_args(argv)
     return args.fn(args)

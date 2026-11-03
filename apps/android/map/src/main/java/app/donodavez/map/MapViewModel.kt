@@ -86,12 +86,14 @@ class MapViewModel(private val c: AppContainer) : ViewModel() {
 
     private suspend fun initialCamera() {
         val saved = c.settings.lastCamera()
-        if (saved != null) {
-            _camera.value = CameraTarget(saved.lat, saved.lon, saved.zoom, animate = false)
+        if (saved != null && CityMapBounds.contains(saved.lat, saved.lon)) {
+            _camera.value = CameraTarget(saved.lat, saved.lon, saved.zoom.coerceIn(CityMapBounds.MIN_ZOOM, CityMapBounds.MAX_ZOOM), animate = false)
             return
         }
         val boot = c.game.bootstrap.filterNotNull().first()
-        boot.regions.firstOrNull()?.center?.let { _camera.value = CameraTarget(it.lat, it.lon, DEFAULT_ZOOM, animate = false) }
+        val center = boot.regions.firstOrNull { it.center?.let { center -> CityMapBounds.contains(center.lat, center.lon) } == true }?.center
+        _camera.value = CameraTarget(center?.lat ?: CityMapBounds.CENTER_LAT,
+            center?.lon ?: CityMapBounds.CENTER_LON, DEFAULT_ZOOM, animate = false)
     }
 
     // ---- Localização (somente com a tela visível) ----
@@ -125,11 +127,13 @@ class MapViewModel(private val c: AppContainer) : ViewModel() {
         lastFixAtMs = System.currentTimeMillis()
         val first = _ui.value.me == null
         _ui.update { it.copy(me = s, noSignal = false) }
-        if (_ui.value.follow) _camera.value = CameraTarget(s.lat, s.lon, if (first) DEFAULT_ZOOM else null, animate = !first)
+        if (_ui.value.follow && CityMapBounds.contains(s.lat, s.lon)) {
+            _camera.value = CameraTarget(s.lat, s.lon, if (first) DEFAULT_ZOOM else null, animate = !first)
+        }
     }
 
     fun recenter() {
-        val me = _ui.value.me ?: return
+        val me = _ui.value.me?.takeIf { CityMapBounds.contains(it.lat, it.lon) } ?: return
         _ui.update { it.copy(follow = true) }
         _camera.value = CameraTarget(me.lat, me.lon, DEFAULT_ZOOM, animate = true)
     }
@@ -139,7 +143,7 @@ class MapViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun goToRegion() {
-        val center = c.game.bootstrap.value?.regions?.firstOrNull()?.center ?: return
+        val center = c.game.bootstrap.value?.regions?.firstOrNull { CityMapBounds.contains(it.center.lat, it.center.lon) }?.center ?: return
         _ui.update { it.copy(follow = false) }
         _camera.value = CameraTarget(center.lat, center.lon, DEFAULT_ZOOM, animate = true)
     }

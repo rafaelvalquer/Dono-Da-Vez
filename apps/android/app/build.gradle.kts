@@ -31,7 +31,7 @@ android {
             buildConfigField("String", "DV_ENVIRONMENT", quoted("local"))
             buildConfigField("String", "SUPABASE_URL", quoted("http://$host:54321"))
             buildConfigField("String", "PUBLISHABLE_KEY", quoted(prop("dvLocalPublishableKey")))
-            buildConfigField("String", "MAP_STYLE_URL", quoted(prop("dvLocalMapStyleUrl")))
+            buildConfigField("String", "MAP_STYLE_URL", quoted(prop("dvLocalMapStyleUrl").ifEmpty { "https://tiles.openfreemap.org/styles/bright" }))
             buildConfigField("String", "MAP_PUBLIC_KEY", quoted(prop("dvLocalMapPublicKey")))
             buildConfigField("boolean", "ALLOW_MOCK_LOCATION", "true")
             firebase(this, "Local")
