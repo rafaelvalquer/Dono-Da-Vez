@@ -76,6 +76,7 @@ object MapLayers {
     private const val L_RADIUS_LINE = "dv-radius-line"
     const val L_FLAT = "dv-flat"
     const val L_EXTRUSION = "dv-extrusion"
+    private const val L_OUTLINES = "dv-property-edges"
     const val L_POINTS = "dv-points"
     const val L_ICONS = "dv-icons"
     private const val L_SELECTED_LINE = "dv-selected-line"
@@ -116,14 +117,17 @@ object MapLayers {
             LineLayer(L_RADIUS_LINE, SRC_RADIUS).withProperties(lineColor(teal), lineWidth(2f), lineDasharray(arrayOf(2f, 1.5f))),
             // Imóveis
             FillLayer(L_FLAT, SRC_PROPS).withFilter(footprint(true)).withProperties(
-                fillColor(stateColor()), fillOpacity(0.75f), fillOutlineColor(Color.WHITE), visibility(Property.NONE)),
+                fillColor(stateColor()), fillOpacity(0.85f), fillOutlineColor(Color.parseColor("#24463B")), visibility(Property.NONE)),
             FillExtrusionLayer(L_EXTRUSION, SRC_PROPS).withFilter(footprint(true)).withProperties(
                 fillExtrusionColor(stateColor()),
                 fillExtrusionHeight(toNumber(coalesce(get("height_m"), literal(DEFAULT_HEIGHT_M)))),
                 fillExtrusionBase(0f),
-                fillExtrusionOpacity(0.82f)),
+                fillExtrusionOpacity(0.94f)),
+            // Contorno forte, como peças colecionáveis sobre o mapa real.
+            LineLayer(L_OUTLINES, SRC_PROPS).withFilter(footprint(true)).withProperties(
+                lineColor(Color.parseColor("#24463B")), lineWidth(1.5f)),
             CircleLayer(L_POINTS, SRC_PROPS).withFilter(footprint(false)).withProperties(
-                circleColor(stateColor()), circleRadius(9f), circleStrokeColor(Color.WHITE), circleStrokeWidth(2f)),
+                circleColor(stateColor()), circleRadius(9f), circleStrokeColor(Color.parseColor("#24463B")), circleStrokeWidth(2.5f)),
             LineLayer(L_SELECTED_LINE, SRC_SELECTED).withProperties(lineColor(Color.parseColor("#212121")), lineWidth(3.5f)),
             CircleLayer(L_SELECTED_POINT, SRC_SELECTED).withFilter(eq(geometryType(), literal("Point"))).withProperties(
                 circleRadius(14f), circleOpacity(0f), circleStrokeColor(Color.parseColor("#212121")), circleStrokeWidth(3f)),
@@ -195,6 +199,7 @@ object MapLayers {
         (style.getLayer(L_FLAT) as? FillLayer)?.setFilter(all(footprint(true), states))
         (style.getLayer(L_EXTRUSION) as? FillExtrusionLayer)?.setFilter(all(footprint(true), states))
         (style.getLayer(L_POINTS) as? CircleLayer)?.setFilter(all(footprint(false), states))
+        (style.getLayer(L_OUTLINES) as? LineLayer)?.setFilter(all(footprint(true), states))
         (style.getLayer(L_ICONS) as? SymbolLayer)?.setFilter(states)
     }
 
