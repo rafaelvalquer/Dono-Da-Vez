@@ -6,6 +6,7 @@ Usa recortes UTM estáveis de 4 km para respeitar o limite SQL de 50 km².
 """
 from __future__ import annotations
 
+import gzip
 import json
 import logging
 import math
@@ -41,6 +42,24 @@ class CityCell:
     geometry: BaseGeometry
 
 
+MAX_IBGE_RESPONSE_BYTES = 12 * 1024 * 1024
+MAX_IBGE_GEOJSON_BYTES = 48 * 1024 * 1024
+
+
+def decode_ibge_geojson(payload: bytes) -> dict:
+    """Aceita GeoJSON UTF-8 puro ou compactado com gzip pelo endpoint do IBGE.
+
+    urllib.request não descompacta automaticamente respostas gzip. Alguns
+    servidores enviam o corpo gzip mesmo sem o cabeçalho Content-Encoding.
+    Identificar a assinatura (1f 8b) funciona nos dois cenários.
+    """
+    if payload.startswith(b"\\x1f\\x8b"):
+        payload = gzip.decompress(payload)
+    if len(payload) > MAX_IBGE_GEOJSON_BYTES:
+        raise ValueError("GeoJSON do IBGE excede 48 MiB descompactados")
+    return json.loads(payload.decode("utf-8-sig"))
+
+
 def download_boundary(destination: Path) -> Path:
     """Cacheia a versão do polígono para manter os IDs estáveis entre importações."""
     if destination.exists():
@@ -51,8 +70,10 @@ def download_boundary(destination: Path) -> Path:
         "User-Agent": "DonoDaVez-geo-importer/1.0",
     })
     with urllib.request.urlopen(request, timeout=120) as response:  # noqa: S310
-        payload = response.read(12 * 1024 * 1024)
-    data = json.loads(payload.decode("utf-8"))
+        payload = response.read(MAX_IBGE_RESPONSE_BYTES + 1)
+    if len(payload) > MAX_IBGE_RESPONSE_BYTES:
+        raise ValueError("Resposta do IBGE excede 12 MiB")
+    data = decode_ibge_geojson(payload)
     tmp = destination.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
     # Valida antes de fixar no cache.
