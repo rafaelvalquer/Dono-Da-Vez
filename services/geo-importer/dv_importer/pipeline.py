@@ -25,6 +25,8 @@ class ImportArgs:
     db_url: str
     workdir: Path | None = None
     publish: bool = True
+    # Em importações grandes, não recalcular o hash do mesmo PBF a cada célula.
+    source_sha256: str | None = None
 
 
 def analyze(pbf: Path, region_geojson: Path, workdir: Path | None = None) -> BuildResult:
@@ -41,7 +43,7 @@ def run_import(a: ImportArgs) -> dict:
     name = a.region_name or props.get("name") or a.region_code
     workdir = a.workdir or Path(tempfile.mkdtemp(prefix="dv-import-"))
     src = a.pbf if a.pbf is not None else download(a.url or "", workdir / "download")
-    digest = sha256_file(src)
+    digest = a.source_sha256 or sha256_file(src)
     version = source_version(src)
 
     with GeoDb(a.db_url) as db:
