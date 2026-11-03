@@ -9,12 +9,11 @@ from __future__ import annotations
 import json
 import logging
 import math
-import os
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from shapely.geometry import box, mapping
+from shapely.geometry import Point, box, mapping
 from shapely.geometry.base import BaseGeometry
 
 from .geometry import LocalProjection, to_multipolygon
@@ -68,7 +67,7 @@ def load_city_boundary(path: Path) -> BaseGeometry:
     area = proj.to_m(geom).area / 1e6
     if not (MIN_CITY_KM2 <= area <= MAX_CITY_KM2):
         raise ValueError(f"Malha municipal incorreta: {area:.1f} km² (esperado município 3550308)")
-    if not geom.contains(__import__("shapely").geometry.Point(*CITY_CENTER)):
+    if not geom.contains(Point(*CITY_CENTER)):
         raise ValueError("Malha municipal não contém o centro de São Paulo")
     return geom
 
@@ -133,14 +132,21 @@ def run_city(*, db_url: str | None, boundary: Path | None = None, pbf: Path | No
     # Faz download somente uma vez. 'extract' reduz o arquivo Sudeste para o município.
     original = pbf if pbf is not None else download(url, workdir / "download")
     city_pbf = workdir / "municipality" / "region.osm.pbf"
-    if not city_pbf.exists():
+    source_marker = workdir / "municipality" / "source.sha256"
+    original_digest = sha256_file(original)
+    if not city_pbf.exists() or not source_marker.exists() or source_marker.read_text().strip() != original_digest:
+        city_pbf.unlink(missing_ok=True)
         city_pbf = extract(original, boundary, workdir / "municipality")
+        source_marker.parent.mkdir(parents=True, exist_ok=True)
+        source_marker.write_text(original_digest, encoding="utf-8")
     if city_pbf == original:
         LOG.warning("osmium-tool ausente: importação ficará lenta sem recorte")
     digest = sha256_file(city_pbf)
     report = {"city": CITY_ID, "cells": len(cells), "processed": 0,
               "published": 0, "skipped": 0, "needs_review": 0, "failed": []}
-    selected = cell_files[:max_cells] if max_cells else cell_files
+    # Os primeiros testes começam próximos ao centro (GPS inicial do emulador).
+    nearby_first = sorted(cell_files, key=lambda pair: pair[0].geometry.distance(Point(*CITY_CENTER)))
+    selected = nearby_first[:max_cells] if max_cells else nearby_first
     for cell, path in selected:
         LOG.info("Importando %s (%s/%s)", cell.code, report["processed"] + 1, len(selected))
         try:
