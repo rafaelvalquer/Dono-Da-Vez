@@ -143,7 +143,9 @@ class MapViewModel(private val c: AppContainer) : ViewModel() {
     }
 
     fun goToRegion() {
-        val center = c.game.bootstrap.value?.regions?.firstOrNull { CityMapBounds.contains(it.center.lat, it.center.lon) }?.center ?: return
+        val center = c.game.bootstrap.value?.regions?.firstOrNull { region ->
+            region.center?.let { CityMapBounds.contains(it.lat, it.lon) } == true
+        }?.center ?: return
         _ui.update { it.copy(follow = false) }
         _camera.value = CameraTarget(center.lat, center.lon, DEFAULT_ZOOM, animate = true)
     }
