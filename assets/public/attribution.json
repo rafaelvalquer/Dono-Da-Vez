@@ -1,0 +1,16 @@
+{
+  "map_data": {
+    "text": "© colaboradores do OpenStreetMap",
+    "license": "ODbL-1.0",
+    "url": "https://www.openstreetmap.org/copyright"
+  },
+  "basemap_schema": {
+    "text": "© OpenMapTiles",
+    "license": "CC-BY-4.0",
+    "url": "https://openmaptiles.org/"
+  },
+  "assets": {
+    "text": "Avatares, ícones e marcadores originais do Dono da Vez",
+    "source": "assets/tools/generate-assets.mjs"
+  }
+}

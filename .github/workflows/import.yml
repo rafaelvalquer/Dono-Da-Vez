@@ -1,0 +1,86 @@
+# Importação OSM de uma região: manual (qualquer ambiente) ou semanal (homologação). O importador roda com o papel
+# dv_importer, que só escreve em geo.staging_* e chama geo_api: nunca altera carteiras, preços pagos ou
+# titularidades. Produção usa o environment "production", que exige aprovação manual de um revisor.
+name: import
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Ambiente de destino
+        type: choice
+        options: [staging, production]
+        default: staging
+      region:
+        description: Código da região (a-z, 0-9, -)
+        required: true
+        default: sp-pinheiros-vila-madalena
+      region_geojson:
+        description: Polígono dentro da imagem (services/geo-importer/regions → /app/regions)
+        required: true
+        default: /app/regions/sp-pinheiros-vila-madalena.geojson
+      url:
+        description: Extrato .osm.pbf (https, Geofabrik)
+        required: true
+        default: https://download.geofabrik.de/south-america/brazil/sudeste-latest.osm.pbf
+      no_publish:
+        description: Parar após validar (publicação pelo painel)
+        type: boolean
+        default: false
+  schedule:
+    # Segunda 06:00 UTC: atualização semanal de homologação. O lote só é publicado se a validação aprovar
+    # automaticamente (remoção ≤ 5%, sem fusões); caso contrário aguarda revisão no painel.
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: import-${{ inputs.environment || 'staging' }}-${{ inputs.region || 'sp-pinheiros-vila-madalena' }}
+  cancel-in-progress: false
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: ${{ inputs.environment || 'staging' }}
+    env:
+      REGION: ${{ inputs.region || 'sp-pinheiros-vila-madalena' }}
+      REGION_GEOJSON: ${{ inputs.region_geojson || '/app/regions/sp-pinheiros-vila-madalena.geojson' }}
+      EXTRACT_URL: ${{ inputs.url || 'https://download.geofabrik.de/south-america/brazil/sudeste-latest.osm.pbf' }}
+      NO_PUBLISH: ${{ inputs.no_publish && '--no-publish' || '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Conferir destino
+        env:
+          DV_IMPORTER_DB_URL: ${{ secrets.DV_IMPORTER_DB_URL }}
+        run: |
+          test -n "$DV_IMPORTER_DB_URL" || { echo "::error::secret DV_IMPORTER_DB_URL ausente no environment"; exit 1; }
+          case "$DV_IMPORTER_DB_URL" in
+            postgresql://dv_importer[.:]*) ;;
+            *) echo "::error::a URL precisa usar o papel dv_importer"; exit 1 ;;
+          esac
+          case "$EXTRACT_URL" in https://*) ;; *) echo "::error::extrato precisa ser https"; exit 1 ;; esac
+
+      - name: Imagem do importador
+        run: docker build -t dv-geo-importer services/geo-importer
+
+      - name: Importar
+        env:
+          DV_IMPORTER_DB_URL: ${{ secrets.DV_IMPORTER_DB_URL }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/work" && chmod 777 "$RUNNER_TEMP/work"
+          docker run --rm -e DV_IMPORTER_DB_URL -v "$RUNNER_TEMP/work:/work" dv-geo-importer \
+            import --region "$REGION" --region-geojson "$REGION_GEOJSON" --url "$EXTRACT_URL" --workdir /work $NO_PUBLISH \
+            | tee "$RUNNER_TEMP/import-result.json"
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: import-${{ inputs.environment || 'staging' }}-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/import-result.json
+            ${{ runner.temp }}/work/*.json
+          if-no-files-found: ignore
+          retention-days: 90

@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://donodavez.invalid/schemas/push-payload.json",
+  "title": "Dados de push FCM (campo data)",
+  "description": "Somente identificadores. O app busca o estado atual na API antes de exibir valores.",
+  "type": "object",
+  "required": ["type"],
+  "properties": {
+    "type": {
+      "enum": ["proposal.received", "proposal.expiring", "proposal.accepted", "proposal.rejected", "proposal.expired",
+               "proposal.unanswered", "proposal.superseded", "proposal.cancelled_by_support", "property.sold",
+               "property.forced_sale", "property.compensated", "wallet.adjustment", "risk.review_decided", "report.updated"]
+    },
+    "notification_id": { "type": "string", "format": "uuid" },
+    "proposal_id": { "type": "string", "format": "uuid" },
+    "property_id": { "type": "string", "format": "uuid" },
+    "trade_id": { "type": "string", "format": "uuid" }
+  },
+  "additionalProperties": false
+}

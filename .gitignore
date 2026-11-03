@@ -1,0 +1,50 @@
+# Segredos e ambientes locais — nunca versionar .env real
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+keystore.properties
+google-services.json
+service-account*.json
+
+# Node / Deno
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+deno.lock.bak
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Supabase local
+supabase/.branches/
+supabase/.temp/
+
+# Dados geográficos baixados (grandes)
+services/geo-importer/data/
+*.osm.pbf
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Saídas do simulador econômico (regeneradas por node tests/economy/simulate.mjs)
+tests/economy/out/

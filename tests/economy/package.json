@@ -1,0 +1,14 @@
+{
+  "name": "@dono-da-vez/tests-economy",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Simulador econômico determinístico (30/90/180 dias) com os parâmetros da migração de configuração.",
+  "scripts": {
+    "simulate": "node simulate.mjs",
+    "test": "node --test \"test/**/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

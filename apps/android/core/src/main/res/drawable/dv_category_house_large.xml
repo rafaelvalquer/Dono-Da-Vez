@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gerado por assets/tools/generate-assets.mjs — não editar à mão. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+  <path android:pathData="M12,3 L2,10.5 H4 V20 H20 V10.5 H22 Z M7,12.5 H10 V15.5 H7 Z M14,12.5 H17 V15.5 H14 Z" android:fillColor="#000000" android:fillType="evenOdd"/>
+</vector>

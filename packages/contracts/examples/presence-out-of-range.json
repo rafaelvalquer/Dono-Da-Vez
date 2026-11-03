@@ -1,0 +1,6 @@
+{
+  "ok": false,
+  "server_time": "2026-11-03T15:00:03.000Z",
+  "error": { "code": "OUT_OF_RANGE", "message": "Aproxime-se do imóvel para continuar", "detail": { "distance_m": 132.4, "radius_m": 80 } },
+  "correlation_id": "0b8f6a52-6f1e-4c7b-9d4f-2a1e3c5b0002"
+}

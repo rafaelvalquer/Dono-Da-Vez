@@ -1,0 +1,11 @@
+{
+  "version": 8,
+  "name": "Dono da Vez — local (sem mapa base)",
+  "metadata": {
+    "dv:comment": "Estilo embutido para o ambiente local: sem tiles externos. Homologação e produção usam MAP_STYLE_URL (assets/styles/dono-da-vez.json hospedado)."
+  },
+  "sources": {},
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#EEF1EC" } }
+  ]
+}

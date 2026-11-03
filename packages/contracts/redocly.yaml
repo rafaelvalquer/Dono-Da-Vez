@@ -1,0 +1,5 @@
+extends:
+  - recommended
+rules:
+  # Erros de domínio seguem o envelope comum (components/responses/Error); nem toda rota lista 4XX.
+  operation-4xx-response: off

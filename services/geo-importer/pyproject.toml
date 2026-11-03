@@ -1,0 +1,27 @@
+[project]
+name = "dv-geo-importer"
+version = "1.0.0"
+description = "Importador OSM do Dono da Vez: extrato PBF → staging → validação → publicação regional"
+requires-python = ">=3.12"
+dependencies = [
+  "osmium==4.3.2",
+  "shapely==2.2.0",
+  "pyproj==3.8.0",
+  "psycopg[binary]==3.3.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==9.1.1"]
+
+[project.scripts]
+dv-geo-importer = "dv_importer.__main__:main"
+
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["dv_importer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

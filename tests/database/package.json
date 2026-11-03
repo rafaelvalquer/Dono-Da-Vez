@@ -1,0 +1,19 @@
+{
+  "name": "@dono-da-vez/tests-database",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Testes SQL de regras econômicas, RLS/grants e concorrência. PGlite (em processo) por padrão; Postgres real com DV_TEST_DATABASE_URL.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.mjs\"",
+    "migrate:check": "node lib/check-migrations.mjs"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "@electric-sql/pglite-postgis": "0.2.10",
+    "pg": "8.23.1"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}

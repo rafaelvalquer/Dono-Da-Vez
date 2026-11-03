@@ -1,0 +1,208 @@
+# Integração contínua: nunca usa projetos remotos. Banco, Auth e Edge Functions vêm do PGlite (em processo) ou
+# da pilha local do Supabase CLI dentro do runner; nenhum secret é necessário.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+  DENO_VERSION: "2.9.6"
+  SUPABASE_CLI_VERSION: "2.122.0"
+
+jobs:
+  database:
+    name: Banco (PGlite)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: tests/database/package-lock.json
+      - run: npm ci
+        working-directory: tests/database
+      - run: npm run migrate:check
+        working-directory: tests/database
+      - run: npm test
+        working-directory: tests/database
+
+  economy:
+    name: Simulação econômica
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - run: npm test
+        working-directory: tests/economy
+      - run: node simulate.mjs --days 30,90,180 --scenario all --seed 42
+        working-directory: tests/economy
+      - uses: actions/upload-artifact@v7
+        with:
+          name: economy-report
+          path: tests/economy/out/
+          retention-days: 30
+
+  functions:
+    name: Edge Functions + e2e (emulado)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: ${{ env.DENO_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: tests/e2e/package-lock.json
+      - name: deno check + lint
+        working-directory: supabase/functions
+        run: |
+          deno check api/index.ts admin/index.ts outbox-worker/index.ts
+          deno lint
+      - run: npm ci
+        working-directory: tests/e2e
+      - run: npm test
+        working-directory: tests/e2e
+
+  admin:
+    name: Console administrativo
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/admin/package-lock.json
+      - run: npm ci
+        working-directory: apps/admin
+      - run: npm run typecheck
+        working-directory: apps/admin
+      - run: npm test
+        working-directory: apps/admin
+      - run: npm run build
+        working-directory: apps/admin
+        env:
+          # Valores públicos do Supabase local, só para validar o build e a CSP.
+          VITE_SUPABASE_URL: http://127.0.0.1:54321
+          VITE_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
+          VITE_DV_ENVIRONMENT: local
+
+  importer:
+    name: Importador OSM (unitários)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/geo-importer/pyproject.toml
+      - run: pip install -e "services/geo-importer[dev]"
+      - run: pytest -q
+        working-directory: services/geo-importer
+      - name: Imagem Docker
+        run: docker build -t dv-geo-importer services/geo-importer
+
+  android:
+    name: Android (local debug + testes)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Build e testes unitários
+        working-directory: apps/android
+        run: ./gradlew --console=plain :app:assembleLocalDebug testLocalDebugUnitTest testDebugUnitTest
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: android-test-reports
+          path: apps/android/**/build/reports/tests/
+          retention-days: 7
+
+  stack:
+    name: Pilha local do Supabase (concorrência, e2e real, importador no banco)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    needs: [database, functions]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: supabase start (migrações + seed fictício local-demo)
+        run: supabase start -x studio,imgproxy,vector,logflare,realtime,supavisor,postgres-meta
+
+      - name: Exportar URLs e chaves da pilha local
+        run: |
+          supabase status -o env > "$RUNNER_TEMP/supabase.env"
+          set -a; . "$RUNNER_TEMP/supabase.env"; set +a
+          {
+            echo "DV_E2E_API_URL=${API_URL}/functions/v1/api"
+            echo "DV_E2E_SUPABASE_URL=${API_URL}"
+            echo "DV_E2E_PUBLISHABLE_KEY=${PUBLISHABLE_KEY:-$ANON_KEY}"
+            echo "DV_E2E_SERVICE_ROLE_KEY=${SECRET_KEY:-$SERVICE_ROLE_KEY}"
+            # supabase_admin (superusuário local): os testes trocam de papel com SET ROLE e simulam o relógio.
+            echo "DV_TEST_DATABASE_URL=postgresql://supabase_admin:postgres@127.0.0.1:54322/postgres"
+            echo "DV_E2E_DATABASE_URL=postgresql://supabase_admin:postgres@127.0.0.1:54322/postgres"
+            echo "DV_TEST_IMPORTER_DB_URL=postgresql://dv_importer:dv_importer_local@127.0.0.1:54322/postgres"
+          } >> "$GITHUB_ENV"
+
+      - name: Concorrência real (duas conexões)
+        working-directory: tests/database
+        run: npm ci && node --test test/concurrency.test.mjs
+
+      - name: Edge Functions locais
+        run: |
+          # O edge runtime roda na rede Docker do CLI: o banco é o contêiner supabase_db_<project_id>.
+          sed 's#@host.docker.internal:54322/#@supabase_db_dono-da-vez:5432/#' supabase/functions/.env.example > "$RUNNER_TEMP/functions.env"
+          nohup supabase functions serve --env-file "$RUNNER_TEMP/functions.env" > "$RUNNER_TEMP/functions.log" 2>&1 &
+          for i in $(seq 1 60); do
+            curl -fsS "$DV_E2E_API_URL/v1/health" && exit 0
+            sleep 2
+          done
+          cat "$RUNNER_TEMP/functions.log"; exit 1
+
+      - name: e2e contra a pilha local
+        working-directory: tests/e2e
+        run: npm ci && npm test
+
+      - name: Importador contra o banco local (fixture fictícia)
+        run: |
+          pip install -e "services/geo-importer[dev]"
+          cd services/geo-importer && pytest -q tests/test_db_integration.py
+
+      - name: Logs das funções
+        if: failure()
+        run: cat "$RUNNER_TEMP/functions.log" || true

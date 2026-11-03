@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Gerado por assets/tools/generate-assets.mjs — não editar à mão. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp"
+    android:viewportWidth="48" android:viewportHeight="48">
+  <path android:pathData="M2,24 A22,22 0 1,0 46,24 A22,22 0 1,0 2,24 Z" android:fillColor="#9E9E9E"/>
+  <group>
+    <clip-path android:pathData="M2,24 A22,22 0 1,0 46,24 A22,22 0 1,0 2,24 Z"/>
+    <path android:pathData="M8,48 C8,34 15,29 24,29 C33,29 40,34 40,48 Z" android:fillColor="#BDBDBD"/>
+    <path android:pathData="M17,19 A7,7 0 1,0 31,19 A7,7 0 1,0 17,19 Z" android:fillColor="#E0E0E0"/>
+  </group>
+  <path android:pathData="M2,24 A22,22 0 1,0 46,24 A22,22 0 1,0 2,24 Z" android:strokeColor="#FFFFFF" android:strokeWidth="2" android:strokeLineCap="round" android:strokeLineJoin="round"/>
+</vector>

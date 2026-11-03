@@ -1,0 +1,24 @@
+{
+  "server_time": "2026-11-03T15:00:02.000Z",
+  "property": {
+    "id": "22222222-0000-4000-8000-000000000001", "category": "house_small", "subtype": "house",
+    "address_label": "Rua Fictícia, 10", "address_status": "informed", "lat": -23.556, "lon": -46.69, "version": 1,
+    "category_name": "Casa pequena", "classification_status": "resolved", "classification_confidence": 0.9,
+    "eligibility": "eligible", "eligibility_reason": null,
+    "interaction_point": { "lat": -23.55605, "lon": -46.69 }, "interaction_quality": "entrance_mapped",
+    "height_m": 6, "height_source": "stylized", "visual_model": "house_small_a", "units_count": null,
+    "region": { "code": "local-demo", "name": "Demo local (fictício)", "release_status": "released", "attribution": "Dados fictícios de desenvolvimento" }
+  },
+  "ownership": null,
+  "reference_price": "1000.00",
+  "daily_income_rate": "0.01",
+  "mine": null,
+  "my_proposal": null,
+  "actions": {
+    "purchase": { "allowed": true, "price": "1000.00", "daily_income": "10.00", "requires_presence": true, "reason": null },
+    "propose": { "allowed": false, "min_amount": "0.01", "requires_presence": true, "reason": "no_owner" },
+    "forced_inactivity": { "allowed": false, "price": null, "requires_presence": true, "reason": null },
+    "forced_silence": { "allowed": false, "proposal_id": null, "price": null, "eligible_until": null, "requires_presence": true }
+  },
+  "history": []
+}

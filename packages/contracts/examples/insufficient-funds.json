@@ -1,0 +1,7 @@
+{
+  "ok": false,
+  "operation_id": "9c0b7c1e-1d2a-4c55-9a51-3f1f0f6a0002",
+  "server_time": "2026-11-03T15:01:00.000Z",
+  "error": { "code": "INSUFFICIENT_FUNDS", "message": "Saldo disponível insuficiente", "detail": { "available": "800.00", "required": "1000.00" } },
+  "correlation_id": "0b8f6a52-6f1e-4c7b-9d4f-2a1e3c5b0003"
+}

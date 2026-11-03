@@ -1,0 +1,715 @@
+openapi: 3.1.0
+info:
+  title: Dono da Vez — API do jogo
+  version: 1.0.0
+  summary: Contrato entre o app Android e a Edge Function `api`.
+  license: { name: Proprietária, identifier: LicenseRef-Proprietary }
+  description: |
+    Regras gerais (ver docs/rules.md):
+    - Autenticação: `Authorization: Bearer <JWT do Supabase Auth>`. O servidor deriva o jogador do token;
+      o cliente **nunca** envia `user_id`.
+    - Dinheiro: sempre **string decimal** (ex.: `"1000.00"`, `"0.27397260"`). Nunca usar float no cliente.
+    - Mutações econômicas exigem `Idempotency-Key` (8–128 caracteres `[A-Za-z0-9_.:-]`), gerada uma vez por
+      intenção do usuário e reutilizada em reenvios. Mesma chave + corpo diferente → `409 IDEMPOTENCY_CONFLICT`.
+      Em timeout, consultar `GET /v1/operations/{key}` antes de tentar de novo.
+    - Horários: ISO-8601 em UTC; `server_time` acompanha as respostas e é o relógio das regras.
+    - Erros: `{ ok:false, error:{ code, message, detail }, correlation_id }`. `message` é texto pt-BR exibível.
+    - Ações presenciais: `POST /v1/presence` emite `proof_id` válido por 30 s e de uso único.
+servers:
+  - url: http://127.0.0.1:54321/functions/v1/api
+    description: Local (supabase start)
+  - url: https://{project_ref}.supabase.co/functions/v1/api
+    description: Homologação / produção
+    variables:
+      project_ref: { default: your-project-ref }
+security:
+  - bearer: []
+tags:
+  - { name: sessão, description: "Inicialização, configuração e atividade" }
+  - { name: mapa, description: "Consulta de imóveis e regiões" }
+  - { name: presença, description: "Prova de presença física" }
+  - { name: negociação, description: "Compras, propostas e operações" }
+  - { name: carteira, description: "Saldo, rendimento, extrato e histórico" }
+  - { name: conta, description: "Perfil, dispositivos, notificações, reportes e exclusão" }
+paths:
+  /v1/health:
+    get:
+      operationId: get_health
+      tags: [sessão]
+      security: []
+      summary: Saúde do serviço e do banco
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, db: { type: boolean }, server_time: { type: string, format: date-time } } } } } }
+  /v1/bootstrap:
+    get:
+      operationId: get_bootstrap
+      tags: [sessão]
+      summary: Configuração pública, perfil, carteira e regiões liberadas
+      description: Concede o saldo inicial (uma única vez por conta e por e-mail confirmado) se ainda não recebido.
+      parameters:
+        - { name: app_version, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Bootstrap" }, examples: { default: { externalValue: "./examples/bootstrap.json" } } } } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /v1/activity:
+    post:
+      operationId: post_activity
+      tags: [sessão]
+      summary: Registra atividade qualificada (app em primeiro plano)
+      description: Sinal usado na regra de inatividade de 14 dias. Limitado a 1 registro por minuto.
+      requestBody:
+        content: { application/json: { schema: { type: object, properties: { source: { type: string, enum: [foreground, resume, heartbeat], default: heartbeat } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, recorded: { type: boolean }, last_qualified_activity_at: { type: [string, "null"], format: date-time } } } } } }
+        "429": { $ref: "#/components/responses/Error" }
+  /v1/profile:
+    get:
+      operationId: get_profile
+      tags: [conta]
+      summary: Perfil do jogador autenticado
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { profile: { $ref: "#/components/schemas/Profile" }, server_time: { type: string, format: date-time } } } } } }
+    patch:
+      operationId: patch_profile
+      tags: [conta]
+      summary: Atualiza apelido, avatar e preferências de notificação
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname: { type: string, pattern: "^[A-Za-z0-9_.-]{3,24}$" }
+                avatar_id: { type: string, pattern: "^avatar_[0-9]{2}$" }
+                notification_prefs: { $ref: "#/components/schemas/NotificationPrefs" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { profile: { $ref: "#/components/schemas/Profile" } } } } } }
+        "409": { description: "NICKNAME_TAKEN", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { $ref: "#/components/responses/Error" }
+  /v1/map:
+    get:
+      operationId: get_map
+      tags: [mapa]
+      summary: Imóveis (zoom ≥ 15) ou agrupamentos (zoom < 15) na área visível
+      parameters:
+        - { name: bbox, in: query, required: true, description: "min_lon,min_lat,max_lon,max_lat (WGS84)", schema: { type: string, example: "-46.695,-23.560,-46.685,-23.552" } }
+        - { name: zoom, in: query, required: true, schema: { type: number, minimum: 0, maximum: 24 } }
+        - { name: cursor, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        "200": { description: GeoJSON FeatureCollection estendida, content: { application/json: { schema: { $ref: "#/components/schemas/MapResponse" }, examples: { default: { externalValue: "./examples/map.json" } } } } }
+        "422": { description: "AREA_TOO_LARGE — aproximar o mapa", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/nearby:
+    get:
+      operationId: get_nearby
+      tags: [mapa]
+      summary: Imóveis mais próximos do jogador (lista acessível ao mapa)
+      parameters:
+        - { name: lat, in: query, required: true, schema: { type: number } }
+        - { name: lon, in: query, required: true, schema: { type: number } }
+        - { name: radius, in: query, schema: { type: number, minimum: 1, maximum: 150, default: 80 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: "#/components/schemas/PropertySummary"
+                        - type: object
+                          properties:
+                            distance_m: { type: number }
+                            state: { $ref: "#/components/schemas/ViewerState" }
+                            interaction_quality: { type: string }
+                  server_time: { type: string, format: date-time }
+  /v1/properties/{id}:
+    get:
+      operationId: get_properties_by_id
+      tags: [mapa]
+      summary: Detalhe do imóvel com ações disponíveis para o jogador
+      parameters: [ { $ref: "#/components/parameters/Id" } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/PropertyDetail" }, examples: { default: { externalValue: "./examples/property-detail.json" } } } } }
+        "404": { $ref: "#/components/responses/Error" }
+  /v1/presence:
+    post:
+      operationId: post_presence
+      tags: [presença]
+      summary: Valida presença física e emite prova de uso único (30 s)
+      description: |
+        Requisitos: distância ≤ 80 m do ponto de interação, precisão ≤ 30 m, leitura com ≤ 15 s,
+        velocidade compatível, sem localização simulada (fora de ambientes de teste). A coordenada bruta
+        não é retornada nem registrada em logs; é retida por no máximo 7 dias para auditoria.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [property_id, lat, lon, accuracy_m, fix_age_ms, nonce]
+              properties:
+                property_id: { type: string, format: uuid }
+                lat: { type: number }
+                lon: { type: number }
+                accuracy_m: { type: number, exclusiveMinimum: 0 }
+                fix_age_ms: { type: integer, minimum: 0 }
+                speed_mps: { type: number, minimum: 0 }
+                nonce: { type: string, pattern: "^[A-Za-z0-9_-]{16,128}$" }
+                mock_location: { type: boolean, default: false }
+                integrity_verdict: { type: string, maxLength: 64 }
+      responses:
+        "200": { description: Prova emitida, content: { application/json: { schema: { $ref: "#/components/schemas/PresenceProof" } } } }
+        "422": { description: "OUT_OF_RANGE, LOCATION_INACCURATE, LOCATION_STALE, SPEED_LIMIT, LOCATION_SUSPICIOUS, NONCE_REUSED", content: { application/json: { schema: { $ref: "#/components/schemas/Error" }, examples: { out_of_range: { externalValue: "./examples/presence-out-of-range.json" } } } } }
+  /v1/purchases:
+    post:
+      operationId: post_purchases
+      tags: [negociação]
+      summary: Compra de imóvel sem dono (preço da categoria)
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [property_id, proof_id], properties: { property_id: { type: string, format: uuid }, proof_id: { type: string, format: uuid }, expected_version: { type: integer } } } } }
+      responses:
+        "200": { description: Comprado, content: { application/json: { schema: { $ref: "#/components/schemas/TransferResult" }, examples: { default: { externalValue: "./examples/purchase.json" } } } } }
+        "409": { description: "ALREADY_OWNER, PROPERTY_CHANGED, INSUFFICIENT_FUNDS, PROPERTY_UNAVAILABLE, IDEMPOTENCY_CONFLICT", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "422": { description: "PRESENCE_REQUIRED", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/proposals:
+    post:
+      operationId: post_proposals
+      tags: [negociação]
+      summary: Envia proposta ao dono (presencial; reserva o valor integral)
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [property_id, ownership_id, amount, proof_id]
+              properties:
+                property_id: { type: string, format: uuid }
+                ownership_id: { type: string, format: uuid, description: Posse vista pelo cliente; mudou → PROPERTY_CHANGED }
+                amount: { $ref: "#/components/schemas/MoneyInput" }
+                proof_id: { type: string, format: uuid }
+      responses:
+        "200": { description: Proposta criada, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, operation_id: { type: string }, proposal: { $ref: "#/components/schemas/Proposal" }, wallet: { $ref: "#/components/schemas/Wallet" } } } } } }
+        "409": { description: "PROPOSAL_EXISTS, PROPOSAL_LIMIT, SELF_PROPOSAL, INSUFFICIENT_FUNDS, PROTECTION_ACTIVE, PROPERTY_CHANGED, RISK_REVIEW", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+        "429": { description: PROPOSAL_COOLDOWN, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+    get:
+      operationId: get_proposals
+      tags: [negociação]
+      summary: Propostas recebidas ou enviadas
+      parameters:
+        - { name: direction, in: query, required: true, schema: { type: string, enum: [received, sent] } }
+        - { name: status, in: query, schema: { type: string, enum: [open, closed, all], default: all } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/Proposal" } }, next_cursor: { type: [string, "null"] }, server_time: { type: string, format: date-time } } } } } }
+  /v1/proposals/{id}/accept:
+    post:
+      operationId: post_proposals_by_id_accept
+      tags: [negociação]
+      summary: Dono aceita (não exige presença); transferência atômica
+      parameters: [ { $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ProposalAction" } } } }
+      responses:
+        "200": { description: Vendido, content: { application/json: { schema: { $ref: "#/components/schemas/TransferResult" } } } }
+        "409": { description: "PROPOSAL_NOT_PENDING, PROPOSAL_EXPIRED, PROPOSAL_CHANGED, HOLD_MISSING, RISK_REVIEW", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/proposals/{id}/reject:
+    post:
+      operationId: post_proposals_by_id_reject
+      tags: [negociação]
+      summary: Dono recusa; reserva do comprador é liberada
+      parameters: [ { $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ProposalAction" } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, proposal: { $ref: "#/components/schemas/Proposal" } } } } } }
+  /v1/proposals/{id}/cancel:
+    post:
+      operationId: post_proposals_by_id_cancel
+      tags: [negociação]
+      summary: Comprador cancela proposta pendente
+      parameters: [ { $ref: "#/components/parameters/Id" }, { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody: { content: { application/json: { schema: { $ref: "#/components/schemas/ProposalAction" } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, proposal: { $ref: "#/components/schemas/Proposal" }, wallet: { $ref: "#/components/schemas/Wallet" } } } } } }
+  /v1/forced-purchases:
+    post:
+      operationId: post_forced_purchases
+      tags: [negociação]
+      summary: Compra sem aceite (+20%) por silêncio do dono ou inatividade de 14 dias
+      description: Presencial. Bloqueada por 24 h após qualquer transferência (PROTECTION_ACTIVE).
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [property_id, reason, proof_id]
+              properties:
+                property_id: { type: string, format: uuid }
+                reason: { type: string, enum: [silence, inactivity] }
+                proposal_id: { type: string, format: uuid, description: Obrigatório quando reason = silence }
+                proof_id: { type: string, format: uuid }
+                expected_version: { type: integer }
+      responses:
+        "200": { description: Comprado sem aceite, content: { application/json: { schema: { $ref: "#/components/schemas/TransferResult" } } } }
+        "409": { description: "OWNER_ACTIVE, WINDOW_CLOSED, PROTECTION_ACTIVE, PROPOSAL_NOT_ELIGIBLE, INSUFFICIENT_FUNDS, PROPERTY_CHANGED, RISK_REVIEW", content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+  /v1/portfolio:
+    get:
+      operationId: get_portfolio
+      tags: [carteira]
+      summary: Imóveis do jogador com rendimento acumulado
+      parameters: [ { $ref: "#/components/parameters/Cursor" }, { $ref: "#/components/parameters/Limit" } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { $ref: "#/components/schemas/Portfolio" } } } }
+  /v1/income/collect:
+    post:
+      operationId: post_income_collect
+      tags: [carteira]
+      summary: Coleta rendimento (créditos em centavos; fração fica acumulada)
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [ownership_ids], properties: { ownership_ids: { type: array, minItems: 1, maxItems: 50, items: { type: string, format: uuid } } } } } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  operation_id: { type: string, format: uuid }
+                  collected: { $ref: "#/components/schemas/Money" }
+                  collected_at: { type: string, format: date-time }
+                  items: { type: array, items: { type: object, properties: { ownership_id: { type: string }, property_id: { type: string }, credited: { $ref: "#/components/schemas/Money" } } } }
+                  skipped: { type: array, items: { type: string, format: uuid }, description: Posses que não são mais do jogador }
+                  ledger_transaction_id: { type: [string, "null"] }
+                  wallet: { $ref: "#/components/schemas/Wallet" }
+  /v1/wallet:
+    get:
+      operationId: get_wallet
+      tags: [carteira]
+      summary: Saldo, reservas e extrato do razão
+      parameters: [ { $ref: "#/components/parameters/Cursor" }, { $ref: "#/components/parameters/Limit" } ]
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  wallet: { allOf: [ { $ref: "#/components/schemas/Wallet" }, { type: object, properties: { collectable_income: { $ref: "#/components/schemas/Money" } } } ] }
+                  holds: { type: array, items: { type: object, properties: { hold_id: { type: string }, proposal_id: { type: string }, amount: { $ref: "#/components/schemas/Money" }, status: { type: string, enum: [active, consumed, released] }, release_reason: { type: [string, "null"] }, created_at: { type: string, format: date-time }, released_at: { type: [string, "null"], format: date-time } } } }
+                  entries: { type: array, items: { type: object, properties: { entry_id: { type: integer }, transaction_id: { type: string }, transaction_kind: { type: string }, entry_type: { type: string }, amount: { $ref: "#/components/schemas/SignedMoney" }, created_at: { type: string, format: date-time }, property: { oneOf: [ { $ref: "#/components/schemas/PropertySummary" }, { type: "null" } ] }, proposal_id: { type: [string, "null"] } } } }
+                  next_cursor: { type: [string, "null"] }
+  /v1/history:
+    get:
+      operationId: get_history
+      tags: [carteira]
+      summary: Histórico unificado de compras, vendas, propostas e rendimentos
+      parameters:
+        - { name: kind, in: query, schema: { type: string, enum: [all, purchases, sales, proposals, income], default: all } }
+        - { $ref: "#/components/parameters/Cursor" }
+        - { $ref: "#/components/parameters/Limit" }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { type: object, properties: { kind: { type: string, enum: [purchase, sale, proposal, income] }, at: { type: string, format: date-time }, amount: { $ref: "#/components/schemas/SignedMoney" }, ref: { type: string }, property: { $ref: "#/components/schemas/PropertySummary" }, detail: { type: object } } } }, next_cursor: { type: [string, "null"] } } } } } }
+  /v1/operations/{key}:
+    get:
+      operationId: get_operations_by_key
+      tags: [negociação]
+      summary: Resultado de uma operação pela Idempotency-Key (após timeout)
+      parameters: [ { name: key, in: path, required: true, schema: { type: string } } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { found: { type: boolean }, operation_id: { type: string }, kind: { type: string }, status: { type: string, enum: [in_progress, succeeded, failed] }, response: { type: [object, "null"] }, created_at: { type: string }, completed_at: { type: [string, "null"] } } } } } }
+  /v1/devices:
+    post:
+      operationId: post_devices
+      tags: [conta]
+      summary: Registra token FCM do aparelho
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [token], properties: { token: { type: string }, platform: { type: string, enum: [android, ios], default: android } } } } } }
+      responses: { "200": { description: OK } }
+  /v1/devices/unregister:
+    post:
+      operationId: post_devices_unregister
+      tags: [conta]
+      summary: Remove token FCM (logout)
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [token], properties: { token: { type: string } } } } } }
+      responses: { "200": { description: OK } }
+  /v1/notifications:
+    get:
+      operationId: get_notifications
+      tags: [conta]
+      summary: Central de notificações
+      parameters: [ { $ref: "#/components/parameters/Cursor" }, { $ref: "#/components/parameters/Limit" } ]
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: "#/components/schemas/Notification" } }, unread: { type: integer }, next_cursor: { type: [string, "null"] } } } } } }
+  /v1/notifications/read:
+    post:
+      operationId: post_notifications_read
+      tags: [conta]
+      summary: Marca notificações como lidas (sem ids = todas)
+      requestBody: { content: { application/json: { schema: { type: object, properties: { ids: { type: array, maxItems: 200, items: { type: string, format: uuid } } } } } } }
+      responses: { "200": { description: OK } }
+  /v1/reports:
+    post:
+      operationId: post_reports
+      tags: [conta]
+      summary: Reporta erro de mapa, categoria, abuso ou bug (gera protocolo)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [category, message]
+              properties:
+                category: { type: string, enum: [map_error, wrong_category, missing_property, abuse, bug, account, other] }
+                property_id: { type: string, format: uuid }
+                message: { type: string, minLength: 5, maxLength: 2000 }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, report_id: { type: integer }, protocol: { type: string, example: DV-000123 } } } } } }
+  /v1/account/deletion:
+    post:
+      operationId: post_account_deletion
+      tags: [conta]
+      summary: Solicita exclusão da conta (exige login recente ≤ 5 min)
+      description: Propostas são canceladas, reservas liberadas e imóveis devolvidos ao sistema. O razão é mantido de forma pseudonimizada.
+      parameters: [ { $ref: "#/components/parameters/IdempotencyKey" } ]
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [confirm], properties: { confirm: { const: EXCLUIR } } } } } }
+      responses:
+        "200": { description: OK, content: { application/json: { schema: { type: object, properties: { ok: { type: boolean }, status: { type: string }, requested_at: { type: string }, properties_to_return: { type: integer } } } } } }
+        "401": { description: REAUTH_REQUIRED, content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } } }
+components:
+  securitySchemes:
+    bearer: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_.:-]{8,128}$" } }
+    Cursor: { name: cursor, in: query, schema: { type: string, maxLength: 200 } }
+    Limit: { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+  responses:
+    Error:
+      description: Erro de domínio
+      content: { application/json: { schema: { $ref: "#/components/schemas/Error" } } }
+  schemas:
+    Money:
+      type: string
+      pattern: "^-?\\d+\\.\\d{2,8}$"
+      description: Valor decimal em moedas virtuais (até 8 casas). Nunca converter para float.
+      examples: ["1000.00", "0.27397260"]
+    SignedMoney: { $ref: "#/components/schemas/Money" }
+    MoneyInput:
+      type: string
+      pattern: "^\\d{1,13}(\\.\\d{1,2})?$"
+      description: Valor ofertado (no máximo 2 casas decimais)
+    Error:
+      type: object
+      required: [ok, error]
+      properties:
+        ok: { const: false }
+        operation_id: { type: string, format: uuid }
+        correlation_id: { type: string }
+        server_time: { type: string, format: date-time }
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code: { $ref: "#/components/schemas/ErrorCode" }
+            message: { type: string }
+            detail: { type: object }
+    ErrorCode:
+      type: string
+      description: Catálogo em ./schemas/error-codes.json
+      enum: [VALIDATION_FAILED, UNAUTHORIZED, REAUTH_REQUIRED, FORBIDDEN, MFA_REQUIRED, ACCOUNT_SUSPENDED, ACCOUNT_CLOSED,
+             EMAIL_NOT_CONFIRMED, NOT_FOUND, PROPERTY_NOT_FOUND, PROPOSAL_NOT_FOUND, PROFILE_NOT_FOUND, WALLET_NOT_FOUND,
+             REGION_NOT_FOUND, REGION_UNAVAILABLE, REGION_LOCKED, RATE_LIMITED, AREA_TOO_LARGE, OUT_OF_RANGE, LOCATION_STALE,
+             LOCATION_INACCURATE, LOCATION_SUSPICIOUS, SPEED_LIMIT, NONCE_REUSED, PRESENCE_REQUIRED, INVALID_AMOUNT,
+             INSUFFICIENT_FUNDS, WALLET_LOCKED, ALREADY_OWNER, PROPERTY_CHANGED, PROPERTY_UNAVAILABLE, SELF_PROPOSAL,
+             PROPOSAL_EXISTS, PROPOSAL_LIMIT, PROPOSAL_COOLDOWN, PROPOSAL_PENDING, PROPOSAL_NOT_PENDING, PROPOSAL_EXPIRED,
+             PROPOSAL_CHANGED, PROPOSAL_NOT_ELIGIBLE, PROTECTION_ACTIVE, OWNER_ACTIVE, WINDOW_CLOSED, COUNTERPARTY_UNAVAILABLE,
+             HOLD_MISSING, HOLD_MISMATCH, RISK_REVIEW, RECONCILIATION_PENDING, IDEMPOTENCY_CONFLICT, NICKNAME_TAKEN,
+             TRANSIENT, INTERNAL]
+    ViewerState:
+      type: string
+      enum: [available, mine, other, proposal, unavailable]
+      description: "available = sem dono; mine = do jogador; other = de outro jogador; proposal = jogador tem proposta pendente; unavailable = em revisão/suspenso"
+    Category:
+      type: string
+      enum: [house_small, house_large, commercial, residential_building]
+    NotificationPrefs:
+      type: object
+      properties: { proposals: { type: boolean }, transfers: { type: boolean }, reminders: { type: boolean } }
+    Profile:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        nickname: { type: [string, "null"] }
+        avatar_id: { type: string }
+        status: { type: string, enum: [active, suspended, deletion_pending, deleted] }
+        email_confirmed: { type: boolean }
+        initial_grant_received: { type: boolean }
+        notification_prefs: { $ref: "#/components/schemas/NotificationPrefs" }
+        created_at: { type: string, format: date-time }
+        deletion_requested_at: { type: [string, "null"], format: date-time }
+        inactivity:
+          type: object
+          properties:
+            last_qualified_activity_at: { type: [string, "null"], format: date-time }
+            inactive_after: { type: [string, "null"], format: date-time }
+    Wallet:
+      type: object
+      properties:
+        balance: { $ref: "#/components/schemas/Money" }
+        reserved: { $ref: "#/components/schemas/Money" }
+        available: { $ref: "#/components/schemas/Money" }
+        frozen: { type: boolean }
+    Bootstrap:
+      type: object
+      properties:
+        server_time: { type: string, format: date-time }
+        min_app_version: { type: integer }
+        update_required: { type: boolean }
+        profile: { $ref: "#/components/schemas/Profile" }
+        wallet: { $ref: "#/components/schemas/Wallet" }
+        config:
+          type: object
+          properties:
+            version: { type: integer }
+            initial_balance: { $ref: "#/components/schemas/Money" }
+            daily_income_rate: { type: string, example: "0.01" }
+            interaction_radius_m: { type: integer, example: 80 }
+            max_gps_accuracy_m: { type: integer, example: 30 }
+            max_location_age_s: { type: integer, example: 15 }
+            presence_proof_ttl_s: { type: integer, example: 30 }
+            max_purchase_speed_kmh: { type: integer }
+            proposal_response_window_s: { type: integer, example: 86400 }
+            owner_inactivity_s: { type: integer, example: 1209600 }
+            forced_purchase_window_s: { type: integer, example: 86400 }
+            transfer_protection_s: { type: integer, example: 86400 }
+            forced_premium: { type: string, example: "1.20" }
+            max_open_proposals_per_buyer: { type: integer }
+            allow_mock_location: { type: boolean }
+            categories:
+              type: array
+              items:
+                type: object
+                properties:
+                  code: { $ref: "#/components/schemas/Category" }
+                  name: { type: string }
+                  base_price: { $ref: "#/components/schemas/Money" }
+                  daily_income: { $ref: "#/components/schemas/Money" }
+                  visual_key: { type: string }
+        regions:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string, format: uuid }
+              code: { type: string }
+              name: { type: string }
+              attribution: { type: string }
+              dataset_version: { type: [string, "null"] }
+              bbox: { type: array, items: { type: number }, minItems: 4, maxItems: 4 }
+              center: { type: object, properties: { lat: { type: number }, lon: { type: number } } }
+    MapResponse:
+      type: object
+      properties:
+        type: { const: FeatureCollection }
+        mode: { type: string, enum: [features, clusters, none] }
+        region_status: { type: string, enum: [available, unavailable] }
+        regions: { type: array, items: { type: object, properties: { id: { type: string }, code: { type: string }, name: { type: string }, attribution: { type: string }, dataset_version: { type: [string, "null"] } } } }
+        features:
+          type: array
+          items:
+            type: object
+            properties:
+              type: { const: Feature }
+              id: { type: string, format: uuid }
+              geometry: { type: object, description: GeoJSON Point/Polygon/MultiPolygon (6 casas) }
+              properties:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  cluster: { type: boolean }
+                  count: { type: integer }
+                  available: { type: integer }
+                  state: { $ref: "#/components/schemas/ViewerState" }
+                  category: { oneOf: [ { $ref: "#/components/schemas/Category" }, { type: "null" } ] }
+                  subtype: { type: [string, "null"] }
+                  height_m: { type: [number, "null"] }
+                  height_source: { type: [string, "null"], enum: [source, levels, stylized, null] }
+                  model: { type: [string, "null"] }
+                  version: { type: integer }
+                  eligibility: { type: string }
+                  has_footprint: { type: boolean }
+                  lat: { type: number }
+                  lon: { type: number }
+        next_cursor: { type: [string, "null"], format: uuid }
+        server_time: { type: string, format: date-time }
+    PropertySummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        category: { oneOf: [ { $ref: "#/components/schemas/Category" }, { type: "null" } ] }
+        subtype: { type: [string, "null"] }
+        address_label: { type: [string, "null"] }
+        address_status: { type: string, enum: [informed, missing] }
+        lat: { type: number }
+        lon: { type: number }
+    ActionInfo:
+      type: object
+      properties:
+        allowed: { type: boolean }
+        price: { oneOf: [ { $ref: "#/components/schemas/Money" }, { type: "null" } ] }
+        daily_income: { oneOf: [ { $ref: "#/components/schemas/Money" }, { type: "null" } ] }
+        min_amount: { $ref: "#/components/schemas/Money" }
+        proposal_id: { type: [string, "null"] }
+        eligible_until: { type: [string, "null"], format: date-time }
+        requires_presence: { type: boolean }
+        reason: { type: [string, "null"], description: "unavailable, owned, no_owner, mine, pending, owner_active, protected …" }
+    PropertyDetail:
+      type: object
+      properties:
+        server_time: { type: string, format: date-time }
+        property:
+          allOf:
+            - $ref: "#/components/schemas/PropertySummary"
+            - type: object
+              properties:
+                version: { type: integer }
+                category_name: { type: [string, "null"] }
+                classification_status: { type: string }
+                classification_confidence: { type: [number, "null"] }
+                eligibility: { type: string }
+                eligibility_reason: { type: [string, "null"] }
+                interaction_point: { type: object, properties: { lat: { type: number }, lon: { type: number } } }
+                interaction_quality: { type: string, enum: [entrance_verified, entrance_mapped, derived_edge, poi_point, centroid_fallback] }
+                height_m: { type: [number, "null"] }
+                height_source: { type: [string, "null"] }
+                visual_model: { type: [string, "null"] }
+                units_count: { type: [integer, "null"] }
+                region: { type: object, properties: { code: { type: string }, name: { type: string }, release_status: { type: string }, attribution: { type: string } } }
+        ownership:
+          type: [object, "null"]
+          properties:
+            ownership_id: { type: string, format: uuid }
+            owner_nickname: { type: string }
+            owner_avatar_id: { type: string }
+            is_mine: { type: boolean }
+            purchase_price: { $ref: "#/components/schemas/Money" }
+            acquired_at: { type: string, format: date-time }
+            owner_daily_income: { $ref: "#/components/schemas/Money" }
+            protected_until: { type: [string, "null"], format: date-time }
+        reference_price: { $ref: "#/components/schemas/Money" }
+        daily_income_rate: { type: string }
+        mine:
+          type: [object, "null"]
+          properties:
+            accrued: { $ref: "#/components/schemas/Money" }
+            collectable: { $ref: "#/components/schemas/Money" }
+            pending_offers: { type: integer }
+        my_proposal: { oneOf: [ { $ref: "#/components/schemas/Proposal" }, { type: "null" } ] }
+        actions:
+          type: object
+          properties:
+            purchase: { $ref: "#/components/schemas/ActionInfo" }
+            propose: { $ref: "#/components/schemas/ActionInfo" }
+            forced_inactivity: { $ref: "#/components/schemas/ActionInfo" }
+            forced_silence: { $ref: "#/components/schemas/ActionInfo" }
+        history:
+          type: array
+          items: { type: object, properties: { trade_id: { type: string }, type: { type: string }, price: { $ref: "#/components/schemas/Money" }, occurred_at: { type: string }, buyer_nickname: { type: string }, seller_nickname: { type: [string, "null"] } } }
+    PresenceProof:
+      type: object
+      properties:
+        ok: { const: true }
+        proof_id: { type: string, format: uuid }
+        expires_at: { type: string, format: date-time }
+        distance_m: { type: number }
+        radius_m: { type: integer }
+        server_time: { type: string, format: date-time }
+    Proposal:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        property: { $ref: "#/components/schemas/PropertySummary" }
+        ownership_id: { type: string, format: uuid }
+        direction: { type: string, enum: [sent, received] }
+        counterpart_nickname: { type: [string, "null"] }
+        amount: { $ref: "#/components/schemas/Money" }
+        status: { type: string, enum: [pending, accepted, rejected, cancelled, expired, executed_without_acceptance, superseded] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        eligible_until: { type: [string, "null"], format: date-time }
+        forced_price: { $ref: "#/components/schemas/Money" }
+        version: { type: integer }
+        rules_version: { type: integer }
+        trade_id: { type: [string, "null"], format: uuid }
+    ProposalAction:
+      type: object
+      properties: { expected_version: { type: integer, minimum: 1 } }
+    TransferResult:
+      type: object
+      properties:
+        ok: { const: true }
+        operation_id: { type: string, format: uuid }
+        server_time: { type: string, format: date-time }
+        trade_id: { type: string, format: uuid }
+        ownership_id: { type: string, format: uuid }
+        property_id: { type: string, format: uuid }
+        property_version: { type: integer }
+        purchase_price: { $ref: "#/components/schemas/Money" }
+        daily_income: { $ref: "#/components/schemas/Money" }
+        acquired_at: { type: string, format: date-time }
+        reason: { type: string, enum: [silence, inactivity] }
+        ledger_transaction_id: { type: string, format: uuid }
+        proposal: { $ref: "#/components/schemas/Proposal" }
+        wallet: { $ref: "#/components/schemas/Wallet" }
+    Portfolio:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            properties:
+              ownership_id: { type: string, format: uuid }
+              acquired_at: { type: string, format: date-time }
+              acquired_via: { type: string }
+              purchase_price: { $ref: "#/components/schemas/Money" }
+              daily_income: { $ref: "#/components/schemas/Money" }
+              accrued: { $ref: "#/components/schemas/Money" }
+              collectable: { $ref: "#/components/schemas/Money" }
+              income_credited: { $ref: "#/components/schemas/Money" }
+              pending_offers: { type: integer }
+              property: { allOf: [ { $ref: "#/components/schemas/PropertySummary" }, { type: object, properties: { eligibility: { type: string }, version: { type: integer } } } ] }
+        totals:
+          type: object
+          properties:
+            count: { type: integer }
+            daily_income: { $ref: "#/components/schemas/Money" }
+            collectable: { $ref: "#/components/schemas/Money" }
+            invested: { $ref: "#/components/schemas/Money" }
+        next_cursor: { type: [string, "null"] }
+        server_time: { type: string, format: date-time }
+    Notification:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        type: { type: string, example: proposal.received }
+        payload: { type: object }
+        created_at: { type: string, format: date-time }
+        read_at: { type: [string, "null"], format: date-time }

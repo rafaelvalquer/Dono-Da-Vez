@@ -1,0 +1,17 @@
+{
+  "ok": true,
+  "operation_id": "9c0b7c1e-1d2a-4c55-9a51-3f1f0f6a0001",
+  "server_time": "2026-11-03T15:00:05.120Z",
+  "trade_id": "5d3a7e9b-8c41-4f0e-9a77-0b6a0c4e0001",
+  "ownership_id": "a7e2b8c0-3f1d-4b6a-8e55-1c2d3e4f0001",
+  "old_ownership_id": null,
+  "ledger_transaction_id": "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f0001",
+  "income_settled_to_seller": "0.00",
+  "property_version": 2,
+  "property_id": "22222222-0000-4000-8000-000000000001",
+  "purchase_price": "1000.00",
+  "daily_income": "10.00",
+  "acquired_at": "2026-11-03T15:00:05.118Z",
+  "wallet": { "balance": "4000.00", "reserved": "0.00", "available": "4000.00", "frozen": false },
+  "correlation_id": "0b8f6a52-6f1e-4c7b-9d4f-2a1e3c5b0001"
+}

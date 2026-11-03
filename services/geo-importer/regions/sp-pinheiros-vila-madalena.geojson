@@ -1,0 +1,19 @@
+{
+  "type": "Feature",
+  "properties": {
+    "code": "sp-pinheiros-vila-madalena",
+    "name": "São Paulo — Vila Madalena / Pinheiros (piloto)",
+    "status": "APROXIMAÇÃO INICIAL: revisar o polígono após o relatório de cobertura e antes de liberar a região",
+    "source_extract": "https://download.geofabrik.de/south-america/brazil/sudeste-latest.osm.pbf"
+  },
+  "geometry": {
+    "type": "Polygon",
+    "coordinates": [[
+      [-46.6990, -23.5480],
+      [-46.6840, -23.5480],
+      [-46.6800, -23.5600],
+      [-46.6950, -23.5650],
+      [-46.6990, -23.5480]
+    ]]
+  }
+}

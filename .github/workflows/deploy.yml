@@ -1,0 +1,139 @@
+# Implantação por ambiente (environments do GitHub "staging" e "production"; produção exige aprovação manual).
+# Nenhum teste roda contra estes projetos: os testes ficam no ci.yml, sempre em banco local/descartável.
+# Variáveis por environment (vars): SUPABASE_PROJECT_REF, SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, MAP_STYLE_URL,
+# MAP_PUBLIC_KEY, FIREBASE_PROJECT_ID, FIREBASE_APP_ID, FIREBASE_API_KEY, FIREBASE_SENDER_ID, ADMIN_API_URL.
+# Secrets: SUPABASE_ACCESS_TOKEN (repositório); SUPABASE_DB_PASSWORD e ANDROID_* (por environment).
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        default: staging
+      components:
+        description: "Partes a implantar (separadas por vírgula: backend, android, admin)"
+        default: backend,android,admin
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+env:
+  SUPABASE_CLI_VERSION: "2.122.0"
+  NODE_VERSION: "22"
+
+jobs:
+  backend:
+    if: contains(inputs.components, 'backend')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ inputs.environment }}
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: supabase/setup-cli@v3
+        with:
+          version: ${{ env.SUPABASE_CLI_VERSION }}
+      - name: Vincular projeto
+        run: |
+          test -n "$PROJECT_REF" || { echo "::error::var SUPABASE_PROJECT_REF ausente"; exit 1; }
+          supabase link --project-ref "$PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+      - name: Migrações (prévia e aplicação)
+        run: |
+          supabase db push --dry-run
+          supabase db push
+      - name: Edge Functions
+        run: supabase functions deploy api admin outbox-worker --project-ref "$PROJECT_REF"
+      - name: Saúde da API
+        run: curl -fsS "${{ vars.SUPABASE_URL }}/functions/v1/api/v1/health"
+
+  android:
+    needs: [backend]
+    # Depois do backend quando ele foi selecionado; sozinho quando não foi (needs pulado não bloqueia).
+    if: ${{ !failure() && !cancelled() && contains(inputs.components, 'android') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    environment: ${{ inputs.environment }}
+    env:
+      FLAVOR: ${{ inputs.environment == 'production' && 'Prod' || 'Staging' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v6
+      - name: Keystore de upload
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "::error::secret ANDROID_KEYSTORE_BASE64 ausente"; exit 1; }
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/upload.jks"
+      - name: AAB assinado
+        working-directory: apps/android
+        env:
+          DV_UPLOAD_KEYSTORE: ${{ runner.temp }}/upload.jks
+          DV_UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          DV_UPLOAD_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          DV_UPLOAD_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # Valores públicos do ambiente (chave publicável e chave de tiles restrita por pacote/assinatura).
+          V_SupabaseUrl: ${{ vars.SUPABASE_URL }}
+          V_PublishableKey: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+          V_MapStyleUrl: ${{ vars.MAP_STYLE_URL }}
+          V_MapPublicKey: ${{ vars.MAP_PUBLIC_KEY }}
+          V_FirebaseProjectId: ${{ vars.FIREBASE_PROJECT_ID }}
+          V_FirebaseAppId: ${{ vars.FIREBASE_APP_ID }}
+          V_FirebaseApiKey: ${{ vars.FIREBASE_API_KEY }}
+          V_FirebaseSenderId: ${{ vars.FIREBASE_SENDER_ID }}
+        run: |
+          # Propriedades do Gradle por flavor (dvStagingSupabaseUrl, dvProdSupabaseUrl, ...).
+          for name in SupabaseUrl PublishableKey MapStyleUrl MapPublicKey FirebaseProjectId FirebaseAppId FirebaseApiKey FirebaseSenderId; do
+            var="V_${name}"
+            export "ORG_GRADLE_PROJECT_dv${FLAVOR}${name}=${!var}"
+          done
+          ./gradlew --console=plain ":app:bundle${FLAVOR}Release"
+      - name: Remover keystore
+        if: always()
+        run: rm -f "$RUNNER_TEMP/upload.jks"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-${{ inputs.environment }}-${{ github.run_number }}
+          path: apps/android/app/build/outputs/bundle/*Release/*.aab
+          retention-days: 30
+
+  admin:
+    if: contains(inputs.components, 'admin')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: apps/admin/package-lock.json
+      - run: npm ci
+        working-directory: apps/admin
+      - name: Build (somente valores públicos)
+        working-directory: apps/admin
+        env:
+          VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
+          VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.SUPABASE_PUBLISHABLE_KEY }}
+          VITE_ADMIN_API_URL: ${{ vars.ADMIN_API_URL }}
+          VITE_DV_ENVIRONMENT: ${{ inputs.environment }}
+        run: npm run build
+      # A hospedagem estática do painel é escolha da equipe (ver apps/admin/README.md: cabeçalhos e CSP).
+      - uses: actions/upload-artifact@v7
+        with:
+          name: admin-${{ inputs.environment }}-${{ github.run_number }}
+          path: apps/admin/dist/
+          retention-days: 30

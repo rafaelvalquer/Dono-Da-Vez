@@ -1,0 +1,19 @@
+{
+  "name": "@dono-da-vez/tests-e2e",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Jornadas HTTP contra a Edge Function api real e falhas de rede (resposta perdida após o commit, timeout, retry). Pilha emulada (PGlite + Deno) por padrão; pilha local do Supabase com DV_E2E_API_URL.",
+  "scripts": {
+    "test": "node --test --test-concurrency=1 \"test/**/*.test.mjs\""
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "0.5.10",
+    "@electric-sql/pglite-postgis": "0.2.10",
+    "@electric-sql/pglite-socket": "0.2.13",
+    "pg": "8.23.1"
+  },
+  "engines": {
+    "node": ">=22.12"
+  }
+}
