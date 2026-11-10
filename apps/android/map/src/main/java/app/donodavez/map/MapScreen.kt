@@ -224,16 +224,23 @@ fun MapScreen(
         }
     }
 
-    // Anel pulsante sob o jogador: ~30 fps pelo relógio de quadros (pausa quando a tela sai).
-    LaunchedEffect(style, ui.me != null) {
+    // Anel pulsante sob o jogador: dois pulsos a cada leitura nova do GPS e depois some (PlayerPulse), para o
+    // mapa 3D não redesenhar sem parar. ~30 fps pelo relógio de quadros; pausa quando a tela sai.
+    var pulseOrigin by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(style, ui.me) {
         val s = style ?: return@LaunchedEffect
-        if (ui.me == null) return@LaunchedEffect
+        if (ui.me == null) { pulseOrigin = null; return@LaunchedEffect }
+        val origin = withFrameNanos { now -> PlayerPulse.origin(pulseOrigin, now / 1_000_000L) }
+        pulseOrigin = origin
         var last = 0L
-        while (true) {
+        var pulsing = true
+        while (pulsing) {
             withFrameNanos { now ->
-                if (now - last >= 33_000_000L) {
+                val phase = PlayerPulse.phase(now / 1_000_000L - origin)
+                if (phase == null || now - last >= 33_000_000L) {
                     last = now
-                    MapLayers.setPulse(s, (now / 1_000_000L % PULSE_MS).toFloat() / PULSE_MS)
+                    MapLayers.setPulse(s, phase ?: 1f) // fase 1: anel invisível até a próxima leitura
+                    pulsing = phase != null
                 }
             }
         }
@@ -453,7 +460,7 @@ private fun LegendDialog(ui: MapUi, radius: Int, onDismiss: () -> Unit) {
                 }
                 Text("O sinal de + dos imóveis disponíveis aparece ao aproximar o mapa; de longe, o verde já indica.")
                 Text("Imóvel dourado: o que você selecionou.")
-                Text("Pin com o seu avatar e anel pulsante: sua posição. A seta no chão mostra a direção enquanto você anda.")
+                Text("Pin com o seu avatar: sua posição. O anel pulsa a cada nova leitura do GPS, e a seta no chão mostra a direção enquanto você anda.")
                 Text("Círculo tracejado verde-azulado: alcance de $radius m para negociar.")
                 Text("Círculo azul: precisão atual do GPS (quanto menor, melhor).")
                 Text("As alturas dos prédios em 3D são ilustrativas; quando o dado não existe, usamos andares ou um padrão da categoria.")
@@ -467,5 +474,4 @@ private fun LegendDialog(ui: MapUi, radius: Int, onDismiss: () -> Unit) {
 }
 
 private const val TILT = 45.0
-private const val PULSE_MS = 1_800L
 private const val MOVING_MPS = 0.7f
