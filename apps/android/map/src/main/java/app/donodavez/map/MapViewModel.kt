@@ -66,6 +66,8 @@ class MapViewModel(private val c: AppContainer) : ViewModel() {
     private val viewport = MutableStateFlow<Viewport?>(null)
     private var loadedBox: DoubleArray? = null
     private var loadedClusters: Boolean? = null
+    /** A área com folga não coube no limite de imóveis: as próximas cargas pedem só a tela. */
+    private var screenOnly = false
     private var loadJob: Job? = null
     private var locationJob: Job? = null
     private var lastFixAtMs = 0L
@@ -167,21 +169,35 @@ class MapViewModel(private val c: AppContainer) : ViewModel() {
 
     private fun load(v: Viewport, force: Boolean) {
         val clusters = v.zoom < MapRepository.CLUSTER_ZOOM
-        val box = loadedBox
-        val fresh = _ui.value.data?.let { System.currentTimeMillis() - it.fetchedAt < REFRESH_MS } ?: false
-        if (!force && fresh && box != null && loadedClusters == clusters && Geo.contains(box, v.bbox) && _ui.value.error == null) return
-
         val centerLat = (v.bbox[1] + v.bbox[3]) / 2
         val centerLon = (v.bbox[0] + v.bbox[2]) / 2
         val maxKm2 = if (clusters) MAX_CLUSTER_KM2 else MAX_FEATURES_KM2
-        val request = clampArea(Geo.expand(v.bbox, MARGIN), centerLat, centerLon, maxKm2)
+        val screen = clampArea(v.bbox, centerLat, centerLon, maxKm2)
+        val tight = screenOnly && !clusters
+        val request = if (tight) screen else clampArea(Geo.expand(v.bbox, MARGIN), centerLat, centerLon, maxKm2)
+
+        val loaded = _ui.value.data
+        val box = loadedBox
+        val fresh = loaded?.let { System.currentTimeMillis() - it.fetchedAt < REFRESH_MS } ?: false
+        if (!force && fresh && box != null && loadedClusters == clusters && _ui.value.error == null &&
+            canReuse(box, v.bbox, request, loaded?.truncated == true, if (tight) SCREEN_ONLY_TOLERANCE else 0.0)
+        ) return
 
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
             _ui.update { it.copy(loading = true) }
             try {
-                val data = repo.load(Viewport(request, v.zoom))
-                loadedBox = if (data.offlineSince == null) request else null
+                var area = request
+                var data = repo.load(Viewport(area, v.zoom))
+                if (data.truncated && !tight) {
+                    // A folga não coube no limite de imóveis: a área da tela vem primeiro.
+                    screenOnly = true
+                    area = screen
+                    data = repo.load(Viewport(area, v.zoom))
+                } else if (tight && fitsWithMargin(data.features.size)) {
+                    screenOnly = false
+                }
+                loadedBox = if (data.offlineSince == null) area else null
                 loadedClusters = clusters
                 _ui.update { it.copy(data = data, loading = false, error = null, areaTooLarge = false) }
             } catch (e: ApiException) {
@@ -272,6 +288,28 @@ class MapViewModel(private val c: AppContainer) : ViewModel() {
         // Abaixo dos limites do servidor (map_max_bbox_km2 = 6, map_cluster_max_bbox_km2 = 400).
         private const val MAX_FEATURES_KM2 = 5.0
         private const val MAX_CLUSTER_KM2 = 350.0
+        private const val SHRINK_TO_RELOAD = 0.9
+        // Sem folga, a oscilação do GPS tiraria a tela da área carregada a cada leitura.
+        private const val SCREEN_ONLY_TOLERANCE = 0.05
+        // Sobra exigida para voltar a pedir com folga, evitando alternar entre os dois modos.
+        private const val FIT_HEADROOM = 0.8
+
+        /**
+         * A carga anterior ainda serve para a câmera atual? Precisa cobrir a área visível e, se veio cortada,
+         * não pode ser de uma área bem maior que a nova: ao aproximar, cabem os imóveis que ficaram de fora.
+         */
+        fun canReuse(
+            loaded: DoubleArray, visible: DoubleArray, request: DoubleArray, truncated: Boolean, tolerance: Double = 0.0,
+        ): Boolean = Geo.contains(Geo.expand(loaded, tolerance), visible) &&
+            !(truncated && boxArea(request) < boxArea(loaded) * SHRINK_TO_RELOAD)
+
+        /** Pela contagem na área da tela, a área com folga caberia com sobra no limite de imóveis? */
+        fun fitsWithMargin(screenCount: Int): Boolean {
+            val growth = (1 + 2 * MARGIN) * (1 + 2 * MARGIN)
+            return screenCount * growth <= MapRepository.PAGE_SIZE * MapRepository.MAX_PAGES * FIT_HEADROOM
+        }
+
+        private fun boxArea(b: DoubleArray) = (b[2] - b[0]) * (b[3] - b[1])
 
         /** Reduz a caixa em torno do centro até caber na área máxima aceita pelo servidor. */
         fun clampArea(bbox: DoubleArray, centerLat: Double, centerLon: Double, maxKm2: Double): DoubleArray {

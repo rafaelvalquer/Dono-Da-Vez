@@ -52,6 +52,7 @@ import app.donodavez.core.ui.Avatars
 import app.donodavez.core.ui.BusyButton
 import app.donodavez.core.ui.EmptyState
 import app.donodavez.core.ui.ErrorBox
+import app.donodavez.core.ui.InfoLine
 import app.donodavez.core.ui.Loadable
 import app.donodavez.core.ui.LoadingBox
 import app.donodavez.core.ui.MoneyLine
@@ -99,6 +100,9 @@ private fun Content(p: PortfolioDto, savedAt: Long?, ui: PortfolioUi, offline: B
                     Text(if (p.totals.count == 1) "1 imóvel" else "${p.totals.count} imóveis", fontWeight = FontWeight.Bold)
                     MoneyLine("Total investido", p.totals.invested)
                     MoneyLine("Renda por dia", p.totals.dailyIncome, emphasize = true)
+                    if (Money.parse(p.totals.openingBonusDaily).signum() > 0) {
+                        MoneyLine("Bônus de inauguração por dia", p.totals.openingBonusDaily)
+                    }
                     MoneyLine("Renda para coletar", p.totals.collectable)
                     BusyButton("Coletar tudo", busy = ui.collecting,
                         enabled = Money.parse(p.totals.collectable).signum() > 0 && !offline && savedAt == null) { vm.collect() }
@@ -158,6 +162,10 @@ private fun PortfolioRow(item: PortfolioItemDto, collecting: Boolean, offline: B
             }
             MoneyLine("Valor pago", item.purchasePrice)
             MoneyLine("Renda por dia", item.dailyIncome)
+            item.openingBonus?.let { b ->
+                MoneyLine("Bônus de inauguração por dia", b.daily)
+                InfoLine("Inauguração até", formatDateTime(b.until))
+            }
             MoneyLine("Para coletar", item.collectable, emphasize = true)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text("Desde ${formatDateTime(item.acquiredAt)}", style = MaterialTheme.typography.labelSmall, modifier = Modifier.weight(1f))

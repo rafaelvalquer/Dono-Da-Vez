@@ -22,6 +22,13 @@ object PropertyRules {
         return null
     }
 
+    /** Período do bônus de inauguração por extenso ("nos 7 primeiros dias"), a partir da duração em segundos. */
+    fun openingBonusPeriod(seconds: Long?): String? = when {
+        seconds == null || seconds <= 0 -> null
+        seconds % 86_400 == 0L -> (seconds / 86_400).let { if (it == 1L) "no primeiro dia" else "nos $it primeiros dias" }
+        else -> ((seconds + 3_599) / 3_600).let { if (it == 1L) "na primeira hora" else "nas $it primeiras horas" }
+    }
+
     fun reasonLabel(reason: String?): String? = when (reason) {
         null -> null
         "unavailable" -> "Imóvel indisponível para negociação no momento"

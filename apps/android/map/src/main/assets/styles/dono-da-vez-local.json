@@ -6,6 +6,6 @@
   },
   "sources": {},
   "layers": [
-    { "id": "background", "type": "background", "paint": { "background-color": "#EEF1EC" } }
+    { "id": "background", "type": "background", "paint": { "background-color": "#F3EBDD" } }
   ]
 }

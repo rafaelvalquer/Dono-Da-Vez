@@ -580,6 +580,22 @@ components:
         eligible_until: { type: [string, "null"], format: date-time }
         requires_presence: { type: boolean }
         reason: { type: [string, "null"], description: "unavailable, owned, no_owner, mine, pending, owner_active, protected …" }
+        opening_bonus:
+          description: "Só em actions.purchase de imóvel sem dono: bônus de inauguração que a compra do sistema receberia (versão atual da configuração)."
+          oneOf:
+            - type: object
+              properties:
+                daily: { $ref: "#/components/schemas/Money" }
+                seconds: { type: integer, example: 604800 }
+            - type: "null"
+    OpeningBonus:
+      description: "Bônus de inauguração ativo de uma titularidade (renda extra por dia até `until`). Nulo quando não há ou já terminou; `daily_income` continua sendo só a renda permanente."
+      oneOf:
+        - type: object
+          properties:
+            daily: { $ref: "#/components/schemas/Money" }
+            until: { type: string, format: date-time }
+        - type: "null"
     PropertyDetail:
       type: object
       properties:
@@ -620,6 +636,7 @@ components:
           properties:
             accrued: { $ref: "#/components/schemas/Money" }
             collectable: { $ref: "#/components/schemas/Money" }
+            opening_bonus: { $ref: "#/components/schemas/OpeningBonus" }
             pending_offers: { type: integer }
         my_proposal: { oneOf: [ { $ref: "#/components/schemas/Proposal" }, { type: "null" } ] }
         actions:
@@ -673,6 +690,7 @@ components:
         property_version: { type: integer }
         purchase_price: { $ref: "#/components/schemas/Money" }
         daily_income: { $ref: "#/components/schemas/Money" }
+        opening_bonus: { $ref: "#/components/schemas/OpeningBonus" }
         acquired_at: { type: string, format: date-time }
         reason: { type: string, enum: [silence, inactivity] }
         ledger_transaction_id: { type: string, format: uuid }
@@ -694,6 +712,7 @@ components:
               accrued: { $ref: "#/components/schemas/Money" }
               collectable: { $ref: "#/components/schemas/Money" }
               income_credited: { $ref: "#/components/schemas/Money" }
+              opening_bonus: { $ref: "#/components/schemas/OpeningBonus" }
               pending_offers: { type: integer }
               property: { allOf: [ { $ref: "#/components/schemas/PropertySummary" }, { type: object, properties: { eligibility: { type: string }, version: { type: integer } } } ] }
         totals:
@@ -701,6 +720,7 @@ components:
           properties:
             count: { type: integer }
             daily_income: { $ref: "#/components/schemas/Money" }
+            opening_bonus_daily: { $ref: "#/components/schemas/Money", description: "Soma dos bônus de inauguração ainda ativos (além de daily_income)" }
             collectable: { $ref: "#/components/schemas/Money" }
             invested: { $ref: "#/components/schemas/Money" }
         next_cursor: { type: [string, "null"] }

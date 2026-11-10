@@ -4,16 +4,19 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .config import (APARTMENT_BUILDINGS, COMMERCIAL_AMENITIES, COMMERCIAL_BUILDINGS, COMMERCIAL_KEYS,
-                     HOUSE_BUILDINGS, INSTITUTIONAL_AMENITIES, RESIDENTIAL_UNDEFINED_BUILDINGS,
-                     SIZE_UNCERTAINTY_BAND, SMALL_HOUSE_MAX_AREA_M2, UNDEFINED_BUILDINGS)
-from .normalize import parse_levels, subtype_of
+                     HOUSE_BUILDINGS, INFERRED_BUILDING_CONFIDENCE, INFERRED_BUILDING_MIN_AREA_M2,
+                     INFERRED_CONFIDENCE, INFERRED_HOUSE_MAX_AREA_M2, INFERRED_HOUSE_MIN_AREA_M2,
+                     INFERRED_NEAR_LIMIT_CONFIDENCE, INSTITUTIONAL_AMENITIES, LOW_RISE_MAX_HEIGHT_M, MAX_HEIGHT_M,
+                     METERS_PER_LEVEL, MIN_HEIGHT_M, RESIDENTIAL_UNDEFINED_BUILDINGS, SIZE_UNCERTAINTY_BAND,
+                     SMALL_HOUSE_MAX_AREA_M2, TALL_MIN_HEIGHT_M, UNDEFINED_BUILDINGS)
+from .normalize import parse_height, parse_levels, subtype_of
 
 
 @dataclass(frozen=True)
 class Classification:
     category: str | None
     subtype: str | None
-    status: str  # resolved | pending_size | undefined | residential_undefined | mixed_use_pending
+    status: str  # resolved | inferred | pending_size | undefined | residential_undefined | mixed_use_pending
     confidence: float
     units: int = 1
 
@@ -47,6 +50,47 @@ def floor_area(footprint_area_m2: float | None, tags: dict[str, str]) -> float |
     return footprint_area_m2 * (parse_levels(tags.get("building:levels")) or 1.0)
 
 
+def _shape(tags: dict[str, str]) -> tuple[float | None, float | None]:
+    """(andares, altura_m) declarados no OSM; valores implausíveis são ignorados."""
+    levels = parse_levels(tags.get("building:levels"))
+    h = parse_height(tags.get("building:height") or tags.get("height"))
+    if h is not None and not MIN_HEIGHT_M <= h <= MAX_HEIGHT_M:
+        h = None
+    return levels, h
+
+
+def infer_house(tags: dict[str, str], footprint_area_m2: float | None) -> Classification | None:
+    """Regra R1 (v2): prédio baixo (até 2 andares) com área de casa vira casa estimada.
+
+    Só quando o OSM não diz o uso (building=yes/residential, sem comércio). O porte usa a mesma regra das casas
+    declaradas: área do contorno × andares (andares declarados, ou estimados pela altura).
+    """
+    levels, h = _shape(tags)
+    if footprint_area_m2 is None or (levels is None and h is None):
+        return None
+    low = levels <= 2 if levels is not None else h < LOW_RISE_MAX_HEIGHT_M
+    if not low or not INFERRED_HOUSE_MIN_AREA_M2 <= footprint_area_m2 <= INFERRED_HOUSE_MAX_AREA_M2:
+        return None
+    floors = levels if levels is not None else max(1.0, float(int(h / METERS_PER_LEVEL)))
+    built = footprint_area_m2 * floors
+    near_limit = abs(built - SMALL_HOUSE_MAX_AREA_M2) <= SMALL_HOUSE_MAX_AREA_M2 * SIZE_UNCERTAINTY_BAND
+    category = "house_small" if built <= SMALL_HOUSE_MAX_AREA_M2 else "house_large"
+    return Classification(category, None, "inferred",
+                          INFERRED_NEAR_LIMIT_CONFIDENCE if near_limit else INFERRED_CONFIDENCE)
+
+
+def infer_tall_residential(tags: dict[str, str], footprint_area_m2: float | None) -> Classification | None:
+    """Regra R3 (v2), só para building=residential: 5 andares ou mais com área de prédio vira prédio residencial."""
+    levels, h = _shape(tags)
+    if footprint_area_m2 is None or (levels is None and h is None):
+        return None
+    tall = levels >= 5 if levels is not None else h >= TALL_MIN_HEIGHT_M
+    if not tall or footprint_area_m2 < INFERRED_BUILDING_MIN_AREA_M2:
+        return None
+    return Classification("residential_building", None, "inferred", INFERRED_BUILDING_CONFIDENCE,
+                          _count(tags.get("building:flats")))
+
+
 def classify_building(tags: dict[str, str], pois: list[LinkedPoi], footprint_area_m2: float | None
                       ) -> Classification | str:
     """Retorna Classification ou o motivo de rejeição (fora do escopo do jogo)."""
@@ -76,7 +120,7 @@ def classify_building(tags: dict[str, str], pois: list[LinkedPoi], footprint_are
         return Classification(category, None, "resolved", 0.75 if near_limit else 0.9)
 
     if b in RESIDENTIAL_UNDEFINED_BUILDINGS:
-        return Classification(None, None, "residential_undefined", 0.3)
+        return infer_house(tags, footprint_area_m2) or infer_tall_residential(tags, footprint_area_m2)             or Classification(None, None, "residential_undefined", 0.3)
 
     if has_commercial:
         subtypes: list[str] = []
@@ -94,7 +138,8 @@ def classify_building(tags: dict[str, str], pois: list[LinkedPoi], footprint_are
                               max(1, len(commercial_pois)))
 
     if b in UNDEFINED_BUILDINGS:
-        return Classification(None, None, "undefined", 0.2)
+        # Sem uso declarado: só a casa baixa é estimada. Prédio alto building=yes pode ser escritório ou hotel.
+        return infer_house(tags, footprint_area_m2) or Classification(None, None, "undefined", 0.2)
 
     return "not_of_interest"
 

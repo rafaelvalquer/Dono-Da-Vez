@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { loadGameConfig } from "./sim/config.mjs";
+import { configPatches, loadGameConfig } from "./sim/config.mjs";
 import { SCENARIOS, checkInvariants, simulate } from "./sim/model.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -49,7 +49,9 @@ const md = [
   `# Simulação econômica — semente ${seed}`,
   "",
   `Parâmetros lidos de \`supabase/migrations/20261103120100_config_catalog.sql\` (saldo inicial ${coins(config.initialBalance)}, renda ${config.dailyIncomeRate * 100}%/dia,`,
-  `+${Math.round((config.forcedPremium - 1) * 100)}% na compra sem aceite, inatividade ${config.inactivityDays} dias, bloqueio de risco ≥ ${config.riskBlockScore}).`,
+  `+${Math.round((config.forcedPremium - 1) * 100)}% na compra sem aceite, inatividade ${config.inactivityDays} dias, bloqueio de risco ≥ ${config.riskBlockScore},`,
+  `bônus de inauguração +${config.openingBonusRate * 100}%/dia por ${config.openingBonusDays} dias nas compras do sistema), com os patches das migrações seguintes`,
+  `(${configPatches().map((p) => `\`${p.file}\``).join(", ") || "nenhum"}).`,
   "",
   ...Object.entries(SCENARIOS).filter(([k]) => scenarios.includes(k)).map(([k, s]) => `- **${k}**: ${s.description}.`),
   "",

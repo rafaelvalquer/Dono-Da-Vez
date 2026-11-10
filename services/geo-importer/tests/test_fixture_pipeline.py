@@ -35,6 +35,18 @@ def test_expected_properties_and_categories(result):
         "osm:way:108": ("house_small", "resolved", "under_review", "centroid_fallback"),
         "osm:way:109": ("house_small", "resolved", "eligible", "derived_edge"),
         "osm:way:111": ("commercial", "resolved", "eligible", "derived_edge"),
+        # Regras v2: categoria estimada pela altura e área (negociável, com aviso na ficha).
+        "osm:way:114": ("house_small", "inferred", "eligible", "derived_edge"),
+        "osm:way:116": ("house_small", "inferred", "eligible", "derived_edge"),
+        "osm:way:120": ("commercial", "resolved", "eligible", "derived_edge"),
+        "osm:way:121": ("house_large", "inferred", "eligible", "derived_edge"),
+        "osm:way:122": ("residential_building", "inferred", "eligible", "derived_edge"),
+        "osm:way:123": (None, "undefined", "pending_classification", "derived_edge"),
+        "osm:way:125": (None, "undefined", "pending_classification", "derived_edge"),
+        "osm:way:126": ("commercial", "resolved", "eligible", "derived_edge"),
+        "osm:way:127": ("house_small", "inferred", "eligible", "derived_edge"),
+        "osm:way:128": ("commercial", "resolved", "eligible", "derived_edge"),
+        "osm:way:130": ("house_small", "inferred", "eligible", "derived_edge"),
         "osm:node:3003": ("commercial", "resolved", "eligible", "poi_point"),
         "osm:relation:5001": ("commercial", "resolved", "eligible", "derived_edge"),
     }
@@ -65,9 +77,52 @@ def test_details(result):
 
 def test_rejects(result):
     reasons = {r.source_ref: r.reason for r in result.rejects}
-    assert reasons["osm:way:110"] == "too_small"
+    assert reasons["osm:way:110"] == "too_small"  # casa declarada pequena demais não é anexo
     assert reasons["osm:way:112"] == "institutional"
     assert reasons["osm:way:113"] == "not_of_interest"
+    assert reasons["osm:way:118"] == "too_small_isolated"
+
+
+def test_inferred_categories_use_height_and_area(result):
+    rows = by_ref(result)
+    assert rows["osm:way:114"].classification_confidence == 0.55
+    assert rows["osm:way:121"].category_code == "house_large"  # 6 m ≈ 2 andares × 100 m²
+    assert rows["osm:way:122"].classification_confidence == 0.6
+    assert rows["osm:way:122"].height_m == 30.0 and rows["osm:way:122"].height_source == "source"
+
+
+def test_annexes_become_parts_of_the_neighbour(result):
+    from dv_importer.geometry import LocalProjection
+    proj = LocalProjection(-46.69, -23.57)
+    rows = by_ref(result)
+    parts = {r.canonical_ref: sorted(s.key for s in r.source_refs if s.role == "part") for r in result.rows}
+    assert parts["osm:way:114"] == ["osm:way:115", "osm:way:119"]  # puxadinho e garagem encostados
+    assert parts["osm:way:116"] == ["osm:way:117"]                 # dois pedaços pequenos viram uma casa
+    assert parts["osm:way:121"] == ["osm:way:124"]                 # anexo menor que 15 m² também entra
+    assert parts["osm:way:120"] == [] and parts["osm:way:125"] == []  # loja e casa com número ficam separadas
+    absorbed = {k for v in parts.values() for k in v}
+    assert not absorbed & set(rows)
+    assert not absorbed & {r.source_ref for r in result.rejects}
+    # O desenho cresce (114: 120 + 20 + 20 m²); a categoria continua pela área do prédio principal.
+    assert abs(proj.to_m(rows["osm:way:114"].footprint).area - 160) < 1.0
+    assert rows["osm:way:114"].source_tags["parts"] == 2
+    assert rows["osm:way:114"].source_refs[0].key == "osm:way:114"
+    assert rows["osm:way:114"].source_refs[0].role == "primary"
+    assert result.counts["annexes_absorbed"] == 4 and result.counts["annex_groups"] == 1
+
+
+def test_poi_links_are_decided_before_joining_annexes(result):
+    rows = by_ref(result)
+
+    def refs(ref, role):
+        return [s.key for s in rows[ref].source_refs if s.role == role]
+
+    # POI a poucos metros do contorno também protege: a loja de 25 m² não vira anexo da casa ao lado.
+    assert refs("osm:way:126", "poi") == ["osm:node:3006"] and rows["osm:way:126"].subtype == "fast_food"
+    assert refs("osm:way:127", "part") == []
+    # O anexo cresce o contorno da casa 130 em direção ao POI, mas a loja continua sendo do vizinho 128.
+    assert refs("osm:way:130", "part") == ["osm:way:131"] and refs("osm:way:130", "poi") == []
+    assert refs("osm:way:128", "poi") == ["osm:node:3007"]
 
 
 def test_interaction_point_within_80m_of_footprint(result):

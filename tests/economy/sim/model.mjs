@@ -59,7 +59,8 @@ export function simulate({ days, seed = 42, scenario = "baseline", config: cfg, 
   for (let i = 0; i < sc.properties; i++) {
     let r = rand(), code = mix[0][0];
     for (const [c, w] of mix) { if (r < w) { code = c; break; } r -= w; }
-    props.push({ id: i, cat: catByCode[code], cell: i % sc.cells, owner: null, price: 0, frac: 0, lastTransfer: -Infinity, ownership: 0 });
+    props.push({ id: i, cat: catByCode[code], cell: i % sc.cells, owner: null, price: 0, frac: 0, lastTransfer: -Infinity, ownership: 0,
+                 bonusRate: 0, bonusUntil: -Infinity });
   }
   const propsByCell = Array.from({ length: sc.cells }, () => []);
   for (const p of props) propsByCell[p.cell].push(p);
@@ -137,6 +138,10 @@ export function simulate({ days, seed = 42, scenario = "baseline", config: cfg, 
     }
     for (const id of [buyer.id, seller?.id]) if (id !== undefined) tradeDays.set(id, [...(tradeDays.get(id) ?? []).filter((d) => d === day), day]);
     p.owner = buyer.id; p.price = price; p.frac = 0; p.lastTransfer = day; p.ownership += 1;
+    // Bônus de inauguração só na compra do sistema; a taxa fica gravada na titularidade.
+    const bonus = seller === null && cfg.openingBonusRate > 0 && cfg.openingBonusDays > 0;
+    p.bonusRate = bonus ? cfg.openingBonusRate : 0;
+    p.bonusUntil = bonus ? day + cfg.openingBonusDays : -Infinity;
     setOf(owned, buyer.id).add(p);
     counters[type] += 1;
   }
@@ -166,7 +171,8 @@ export function simulate({ days, seed = 42, scenario = "baseline", config: cfg, 
   for (let day = 0; day < days; day++) {
     if (day > 0) for (let i = 0; i < sc.dailySignups; i++) join(day);
 
-    for (const p of props) if (p.owner !== null) p.frac += p.price * cfg.dailyIncomeRate;
+    // O incremento do dia t cobre [t-1, t): compra no dia d recebe bônus nos incrementos d+1 … d+dias.
+    for (const p of props) if (p.owner !== null) p.frac += p.price * (cfg.dailyIncomeRate + (day <= p.bonusUntil ? p.bonusRate : 0));
 
     // Job de vencimento: libera a reserva e abre a janela de compra sem aceite.
     for (const set of pendingBySeller.values()) {
@@ -263,11 +269,13 @@ export function simulate({ days, seed = 42, scenario = "baseline", config: cfg, 
     const assets = new Map();
     const income = new Map();
     let ownedCount = 0;
+    let bonusRun = 0;
     for (const p of props) {
       if (p.owner === null) continue;
       ownedCount += 1;
       assets.set(p.owner, (assets.get(p.owner) ?? 0) + p.price);
       income.set(p.owner, (income.get(p.owner) ?? 0) + p.price * cfg.dailyIncomeRate);
+      if (day < p.bonusUntil) bonusRun += p.price * p.bonusRate;
     }
     const runRate = [...income.values()].sort((a, b) => b - a);
     const totalRun = runRate.reduce((s, v) => s + v, 0);
@@ -286,6 +294,7 @@ export function simulate({ days, seed = 42, scenario = "baseline", config: cfg, 
       treasury: ledger.treasury,
       owned_properties: ownedCount,
       daily_income_run_rate: Math.round(totalRun),
+      opening_bonus_run_rate: Math.round(bonusRun),
       top10_income_share: totalRun ? runRate.slice(0, 10).reduce((s, v) => s + v, 0) / totalRun : 0,
       gini_wealth: gini(wealth),
       trades_today: today.length,

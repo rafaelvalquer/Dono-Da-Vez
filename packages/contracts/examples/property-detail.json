@@ -15,7 +15,7 @@
   "mine": null,
   "my_proposal": null,
   "actions": {
-    "purchase": { "allowed": true, "price": "1000.00", "daily_income": "10.00", "requires_presence": true, "reason": null },
+    "purchase": { "allowed": true, "price": "1000.00", "daily_income": "10.00", "opening_bonus": { "daily": "40.00", "seconds": 604800 }, "requires_presence": true, "reason": null },
     "propose": { "allowed": false, "min_amount": "0.01", "requires_presence": true, "reason": "no_owner" },
     "forced_inactivity": { "allowed": false, "price": null, "requires_presence": true, "reason": null },
     "forced_silence": { "allowed": false, "proposal_id": null, "price": null, "eligible_until": null, "requires_presence": true }

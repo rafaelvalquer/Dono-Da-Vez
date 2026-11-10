@@ -72,7 +72,8 @@ describe("concorrência", { skip: enabled ? false : "requer DV_TEST_DATABASE_URL
     await g.ageOwnership(r.ownership_id, 24);
     const [x, y] = await Promise.all([g1.collect(a, [r.ownership_id]), g2.collect(a, [r.ownership_id])]);
     const total = Number(x.collected) + Number(y.collected);
-    assert.ok(total >= 10 && total < 10.01, `total ${total}`);
+    // 24 h dentro da semana de inauguração: 1% + 4% de 1000.
+    assert.ok(total >= 50 && total < 50.01, `total ${total}`);
     assert.deepEqual(await g.invariants(), CLEAN);
   });
 });

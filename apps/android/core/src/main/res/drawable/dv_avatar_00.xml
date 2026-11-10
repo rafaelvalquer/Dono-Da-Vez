@@ -6,8 +6,16 @@
   <path android:pathData="M2,24 A22,22 0 1,0 46,24 A22,22 0 1,0 2,24 Z" android:fillColor="#9E9E9E"/>
   <group>
     <clip-path android:pathData="M2,24 A22,22 0 1,0 46,24 A22,22 0 1,0 2,24 Z"/>
-    <path android:pathData="M8,48 C8,34 15,29 24,29 C33,29 40,34 40,48 Z" android:fillColor="#BDBDBD"/>
-    <path android:pathData="M17,19 A7,7 0 1,0 31,19 A7,7 0 1,0 17,19 Z" android:fillColor="#E0E0E0"/>
+    <path android:pathData="M5,15 A19,12 0 1,0 43,15 A19,12 0 1,0 5,15 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.12"/>
+    <path android:pathData="M7,48 C7,35 14,30.5 24,30.5 C34,30.5 41,35 41,48 Z" android:fillColor="#BDBDBD"/>
+    <path android:pathData="M30,31.4 C36.6,33.4 41,38.4 41,48 L34,48 C34,40.5 32.6,35 30,31.4 Z" android:fillColor="#000000" android:fillAlpha="0.14"/>
+    <path android:pathData="M21,25.5 H27 V31 C27,33 21,33 21,31 Z" android:fillColor="#E0E0E0"/>
+    <path android:pathData="M21,26.5 H27 V28.6 C25,29.8 23,29.8 21,28.6 Z" android:fillColor="#000000" android:fillAlpha="0.16"/>
+    <path android:pathData="M19,30.9 L24,36 L29,30.9 L27.2,30.5 L24,33.7 L20.8,30.5 Z" android:fillColor="#FFFFFF" android:fillAlpha="0.9"/>
+    <path android:pathData="M13.1,20.5 A2.3,2.3 0 1,0 17.7,20.5 A2.3,2.3 0 1,0 13.1,20.5 Z M30.3,20.5 A2.3,2.3 0 1,0 34.9,20.5 A2.3,2.3 0 1,0 30.3,20.5 Z" android:fillColor="#E0E0E0"/>
+    <path android:pathData="M15.5,19.5 A8.5,8.5 0 1,0 32.5,19.5 A8.5,8.5 0 1,0 15.5,19.5 Z" android:fillColor="#E0E0E0"/>
+    <path android:pathData="M24,11 A8.5,8.5 0 0,1 24,28 A9.5,9.5 0 0,0 24,11 Z" android:fillColor="#000000" android:fillAlpha="0.1"/>
   </group>
+  <path android:pathData="M3.4,24 A20.6,20.6 0 1,0 44.6,24 A20.6,20.6 0 1,0 3.4,24 Z" android:strokeColor="#000000" android:strokeWidth="0.8" android:strokeLineCap="round" android:strokeLineJoin="round" android:strokeAlpha="0.22"/>
   <path android:pathData="M2,24 A22,22 0 1,0 46,24 A22,22 0 1,0 2,24 Z" android:strokeColor="#FFFFFF" android:strokeWidth="2" android:strokeLineCap="round" android:strokeLineJoin="round"/>
 </vector>

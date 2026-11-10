@@ -13,7 +13,7 @@ class SourceRef:
     object_type: str  # node | way | relation
     source_id: int
     version: int | None = None
-    role: str = "primary"  # primary | poi | entrance | address
+    role: str = "primary"  # primary | poi | entrance | address | part (anexo absorvido)
 
     @property
     def key(self) -> str:
