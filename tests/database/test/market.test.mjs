@@ -46,13 +46,13 @@ describe("propostas", () => {
 
   it("aceitar transfere: comprador paga a reserva, vendedor recebe preço + renda até o instante", async () => {
     const { seller, buyer, prop, ownershipId } = await setup("acc");
-    await g.ageOwnership(ownershipId, 12); // 12 h de posse → 5,00 de renda
+    await g.ageOwnership(ownershipId, 12); // 12 h de posse na semana de inauguração → 5,00 + 20,00 de bônus
     const p = await g.propose(buyer, prop, 1300);
     const before = await g.wallet(seller);
     const a = await g.accept(seller, p.proposal.id);
     assert.equal(a.ok, true, JSON.stringify(a));
     const settled = Number(a.income_settled_to_seller);
-    assert.ok(settled >= 5 && settled < 5.01, `renda liquidada ${settled}`);
+    assert.ok(settled >= 25 && settled < 25.01, `renda liquidada ${settled}`);
     const after = await g.wallet(seller);
     // Crédito ao vendedor = preço + renda liquidada (8 casas no fechamento).
     assert.equal((Number(after.balance) - Number(before.balance)).toFixed(8), (1300 + Number(a.income_settled_to_seller)).toFixed(8));
@@ -167,6 +167,9 @@ describe("renda", () => {
     const owner = await g.player("renda_a");
     const prop = await g.newProperty(1); // 1000 → 10/dia
     const r = await g.purchase(owner, prop);
+    // Passa a semana de inauguração (coberta em "bônus de inauguração") para medir só a renda permanente.
+    await g.ageOwnership(r.ownership_id, 24 * 7);
+    assert.equal((await g.collect(owner, [r.ownership_id])).ok, true);
     let total = 0;
     for (const hours of [12, 12, 12]) {
       await g.ageOwnership(r.ownership_id, hours);
@@ -209,6 +212,98 @@ describe("renda", () => {
     assert.equal(c.collected, "0.00");
     const fresh = await g.collect(buyer, [a.ownership_id]);
     assert.ok(Number(fresh.collected) < 0.01);
+  });
+});
+
+describe("bônus de inauguração", () => {
+  const collected = async (owner, ownershipId) => {
+    const c = await g.collect(owner, [ownershipId]);
+    assert.equal(c.ok, true, JSON.stringify(c));
+    return Number(c.collected);
+  };
+
+  it("o seed local publica o GPS simulado por cima do bônus, sem perdê-lo", async () => {
+    const [{ cfg }] = await g.q(`select game.cfg() as cfg`);
+    assert.equal(cfg.opening_bonus_rate, "0.04");
+    assert.equal(cfg.opening_bonus_s, 604800);
+    assert.equal(cfg.allow_mock_location, true);
+  });
+
+  it("compra do sistema rende +4% ao dia nos 7 primeiros dias; depois, só 1%", async () => {
+    const owner = await g.player("inaug_a");
+    const prop = await g.newProperty(1); // 1000 → 10/dia + 40/dia na inauguração
+    const r = await g.purchase(owner, prop);
+    assert.equal(r.ok, true, JSON.stringify(r));
+    assert.equal(r.daily_income, "10.00");
+    assert.equal(r.opening_bonus.daily, "40.00");
+    const own = await g.currentOwnership(prop);
+    assert.equal(Number(own.opening_bonus_rate), 0.04);
+    // Tolerância: alguns ms reais entre as chamadas e o arredondamento da coleta para baixo em centavos.
+    await g.ageOwnership(r.ownership_id, 24);
+    const day1 = await collected(owner, r.ownership_id);
+    assert.ok(day1 >= 50 && day1 < 50.02, `dia 1: ${day1}`);
+    await g.ageOwnership(r.ownership_id, 24 * 6);
+    const days2to7 = await collected(owner, r.ownership_id);
+    assert.ok(days2to7 >= 299.99 && days2to7 < 300.02, `dias 2 a 7: ${days2to7}`);
+    await g.ageOwnership(r.ownership_id, 24);
+    const day8 = await collected(owner, r.ownership_id);
+    assert.ok(day8 >= 10 && day8 < 10.02, `dia 8: ${day8}`);
+    assert.deepEqual(await g.invariants(), CLEAN);
+  });
+
+  it("intervalo que cruza o fim da inauguração paga cada parte pela sua taxa", async () => {
+    const owner = await g.player("inaug_b");
+    const prop = await g.newProperty(1);
+    const r = await g.purchase(owner, prop);
+    await g.ageOwnership(r.ownership_id, 156); // 6,5 dias: 6,5 × 50
+    const first = await collected(owner, r.ownership_id);
+    assert.ok(first >= 325 && first < 325.02, `6,5 dias: ${first}`);
+    await g.ageOwnership(r.ownership_id, 24); // 12 h com bônus (25) + 12 h sem (5)
+    const crossing = await collected(owner, r.ownership_id);
+    assert.ok(crossing >= 29.99 && crossing < 30.02, `travessia: ${crossing}`);
+  });
+
+  it("compra de outro jogador não tem bônus: o comprador recebe só 1%", async () => {
+    const { seller, buyer, prop } = await setup("inaug_c");
+    const p = await g.propose(buyer, prop, 1000);
+    const a = await g.accept(seller, p.proposal.id);
+    assert.equal(a.ok, true, JSON.stringify(a));
+    const own = await g.currentOwnership(prop);
+    assert.equal(Number(own.opening_bonus_rate), 0);
+    assert.equal(own.opening_bonus_until, null);
+    const d = await g.api("property_detail", buyer, prop);
+    assert.equal(d.mine.opening_bonus, null);
+    await g.ageOwnership(a.ownership_id, 24);
+    const day1 = await collected(buyer, a.ownership_id);
+    assert.ok(day1 >= 10 && day1 < 10.01, `dia 1: ${day1}`);
+    assert.deepEqual(await g.invariants(), CLEAN);
+  });
+
+  it("ficha, portfólio, carteira e relatório informam o bônus enquanto ele dura", async () => {
+    const a = await g.player("inaug_d");
+    const prop = await g.newProperty(1);
+    let d = await g.api("property_detail", a, prop);
+    assert.equal(d.actions.purchase.daily_income, "10.00");
+    assert.deepEqual(d.actions.purchase.opening_bonus, { daily: "40.00", seconds: 604800 });
+    const r = await g.purchase(a, prop);
+    d = await g.api("property_detail", a, prop);
+    assert.equal(d.ownership.owner_daily_income, "10.00");
+    assert.equal(d.mine.opening_bonus.daily, "40.00");
+    assert.equal(d.actions.purchase.opening_bonus, null);
+    let p = await g.api("portfolio", a, null, 50);
+    assert.equal(p.totals.daily_income, "10.00");
+    assert.equal(p.totals.opening_bonus_daily, "40.00");
+    assert.equal(p.items[0].opening_bonus.daily, "40.00");
+
+    await g.ageOwnership(r.ownership_id, 24 * 8); // 7 × 50 + 1 × 10
+    p = await g.api("portfolio", a, null, 50);
+    assert.equal(p.totals.opening_bonus_daily, "0.00");
+    assert.equal(p.items[0].opening_bonus, null);
+    assert.ok(Number(p.totals.collectable) >= 359.99 && Number(p.totals.collectable) < 360.02, p.totals.collectable);
+    const w = await g.api("wallet", a, null, 50);
+    assert.equal(w.wallet.collectable_income, p.totals.collectable);
+    const [{ rep }] = await g.q("select game_internal.economy_daily_report() as rep");
+    assert.match(rep.opening_bonus_run_rate, /^\d+(\.\d+)?$/);
   });
 });
 

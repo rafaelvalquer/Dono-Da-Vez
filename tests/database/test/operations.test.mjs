@@ -225,6 +225,22 @@ describe("console administrativo", () => {
     assert.equal(v, 90);
   });
 
+  it("zerar o bônus de inauguração numa nova versão vale só para compras novas", async () => {
+    const buyer = await g.player("cfg_bonus");
+    const earlier = await g.newProperty(1);
+    const first = await g.purchase(buyer, earlier);
+    assert.equal(first.opening_bonus.daily, "40.00");
+    const off = await call("admin_api.publish_config($1, $2::jsonb, null, 'sem bônus em teste')", [admin, JSON.stringify({ opening_bonus_rate: "0" })]);
+    assert.equal(off.values.opening_bonus_rate, "0");
+    const second = await g.purchase(buyer, await g.newProperty(1));
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.equal(second.opening_bonus, null);
+    // A compra anterior mantém o bônus fixado na titularidade.
+    const d = await g.api("property_detail", buyer, earlier);
+    assert.equal(d.mine.opening_bonus.daily, "40.00");
+    await call("admin_api.publish_config($1, $2::jsonb, null, 'bônus de volta')", [admin, JSON.stringify({ opening_bonus_rate: "0.04" })]);
+  });
+
   it("conciliação sob demanda e suspensão de jogador", async () => {
     const rec = await call("admin_api.run_reconciliation($1)", [admin]);
     assert.equal(rec.alerts_opened, 0);
@@ -309,5 +325,100 @@ describe("importação geográfica", () => {
     assert.equal(n, 1);
     assert.deepEqual(await g.wallet(owner), walletBefore);
     assert.deepEqual(await g.invariants(), CLEAN);
+  });
+});
+
+describe("importação geográfica: categoria estimada e anexos (regras v2)", () => {
+  const region = { code: "test-geo-v2", name: "Região de teste v2 (fictícia)" };
+  const poly = { type: "Polygon", coordinates: [[[-46.68, -23.57], [-46.67, -23.57], [-46.67, -23.56], [-46.68, -23.56], [-46.68, -23.57]]] };
+  const ref = (k, role = "primary") => {
+    const [provider, objectType, id] = k.split(":");
+    return { provider, object_type: objectType, source_id: Number(id), source_version: 1, role };
+  };
+  const undefinedRow = (k, lon) => ({ k, lon, cat: null, status: "undefined", elig: "pending_classification", refs: [ref(k)] });
+
+  async function stage(sourceHash, rows) {
+    return g.as("dv_importer", async () => {
+      const b = (await g.one("select geo_api.begin_batch($1, 'osm', 'https://example.test/extract.pbf', $2, $3, 2) as r",
+        [region.code, sourceHash.slice(0, 12), sourceHash])).r;
+      for (const it of rows) {
+        await g.q(`insert into geo.staging_properties (batch_id, canonical_ref, source_refs, category_code, classification_status,
+                     classification_confidence, point, footprint, interaction_point, interaction_quality, height_m,
+                     height_source, visual_model, eligibility, eligibility_reason)
+                   values ($1, $2, $3, $4, $5, 0.55,
+                     extensions.st_setsrid(extensions.st_makepoint($6, -23.565), 4326),
+                     extensions.st_multi(extensions.st_buffer(extensions.st_setsrid(extensions.st_makepoint($6, -23.565), 4326), 0.00005, 'endcap=square')),
+                     extensions.st_setsrid(extensions.st_makepoint($6, -23.56505), 4326), 'derived_edge', 5, 'source',
+                     coalesce($4, 'generic'), $7, case when $7 = 'eligible' then null else $5 end)`,
+          [b.batch_id, it.k, JSON.stringify(it.refs), it.cat, it.status, it.lon, it.elig]);
+      }
+      await g.q("select geo_api.complete_staging($1, '{}'::jsonb, '{}'::jsonb)", [b.batch_id]);
+      return { ...b, validation: (await g.one("select geo_api.validate_batch($1) as r", [b.batch_id])).r };
+    });
+  }
+  const publish = (batch) => g.as("dv_importer", async () => (await g.one("select geo_api.publish_batch($1) as r", [batch])).r);
+  const propOf = async (sourceId) => (await g.q(`select p.*, sf.role from game.properties p join geo.source_features sf on sf.property_id = p.id
+                                                 where sf.object_type = 'way' and sf.source_id = $1`, [sourceId]))[0];
+
+  it("categoria estimada é negociável; anexo sem dono vira parte do vizinho; anexo com dono vai para revisão", async () => {
+    await g.as("dv_importer", () => g.q("select geo_api.upsert_region($1, $2, $3::jsonb)", [region.code, region.name, JSON.stringify(poly)]));
+    // Lote v1: casa e anexos ainda indefinidos; uma casa declarada (2005) e seu anexo (2004) já negociáveis.
+    const a = await stage("d".repeat(64), [
+      undefinedRow("osm:way:2001", -46.6790), undefinedRow("osm:way:2002", -46.6789),
+      { k: "osm:way:2004", lon: -46.6750, cat: "house_small", status: "resolved", elig: "eligible", refs: [ref("osm:way:2004")] },
+      { k: "osm:way:2005", lon: -46.6749, cat: "house_small", status: "resolved", elig: "eligible", refs: [ref("osm:way:2005")] },
+    ]);
+    assert.equal(a.validation.status, "approved", JSON.stringify(a.validation));
+    await publish(a.batch_id);
+    await g.q("update game.regions set release_status = 'released' where code = $1", [region.code]);
+    const house = await propOf(2001), annex = await propOf(2002), ownedAnnex = await propOf(2004);
+    assert.equal(house.eligibility, "pending_classification");
+    const owner = await g.player("geo_v2_owner");
+    assert.equal((await g.purchase(owner, ownedAnnex.id)).ok, true);
+    const walletBefore = await g.wallet(owner);
+
+    // Lote v2: 2001 vira casa estimada com o anexo 2002; 2005 tenta absorver 2004, que tem dono.
+    const b = await stage("e".repeat(64), [
+      { k: "osm:way:2001", lon: -46.6790, cat: "house_small", status: "inferred", elig: "eligible",
+        refs: [ref("osm:way:2001"), ref("osm:way:2002", "part")] },
+      { k: "osm:way:2005", lon: -46.6749, cat: "house_small", status: "resolved", elig: "eligible",
+        refs: [ref("osm:way:2005"), ref("osm:way:2004", "part")] },
+    ]);
+    assert.equal(b.validation.diff.absorbed, 1);
+    assert.equal(b.validation.diff.removed, 0);
+    assert.equal(b.validation.diff.merge_candidates, 1);   // só o anexo com dono
+    assert.equal(b.validation.status, "validated");        // fusão com dono exige aprovação humana
+    await g.q("select geo_api.approve_batch($1, null, 'revisado')", [b.batch_id]);
+    const pub = await publish(b.batch_id);
+    assert.equal(pub.absorbed, 1);
+
+    // Casa estimada: mesmo UUID, agora negociável; o anexo aponta para ela como "part".
+    const houseAfter = await propOf(2001);
+    assert.equal(houseAfter.id, house.id);
+    assert.deepEqual([houseAfter.classification_status, houseAfter.eligibility], ["inferred", "eligible"]);
+    const annexRef = await propOf(2002);
+    assert.deepEqual([annexRef.id, annexRef.role], [house.id, "part"]);
+    const [old] = await g.q("select eligibility, eligibility_reason from game.properties where id = $1", [annex.id]);
+    assert.deepEqual([old.eligibility, old.eligibility_reason], ["removed_from_source", "anexo juntado a outro imóvel"]);
+    const [ch] = await g.q("select after from geo.property_changes where property_id = $1 and change_kind = 'absorbed'", [annex.id]);
+    assert.equal(ch.after.absorbed_into, house.id);
+
+    // Anexo com dono: nada muda na posse, na carteira nem no imóvel; abre caso de fusão.
+    assert.equal((await g.currentOwnership(ownedAnnex.id)).owner_id, owner);
+    assert.equal((await propOf(2004)).id, ownedAnnex.id);
+    assert.equal((await propOf(2004)).eligibility, "eligible");
+    const [{ n }] = await g.q(`select count(*)::int n from geo.review_cases where batch_id = $1 and reason = 'merge'`, [b.batch_id]);
+    assert.equal(n, 1);
+    assert.deepEqual(await g.wallet(owner), walletBefore);
+
+    // Categoria estimada pode ser comprada como qualquer outra.
+    const buyer = await g.player("geo_v2_buyer");
+    assert.equal((await g.purchase(buyer, house.id)).ok, true);
+    assert.deepEqual(await g.invariants(), CLEAN);
+  });
+
+  it("restrição do banco: estimada sem categoria continua fora do mercado", async () => {
+    const [{ id }] = await g.q("select id from game.properties where classification_status = 'inferred' limit 1");
+    await assert.rejects(g.q("update game.properties set category_id = null where id = $1", [id]));
   });
 });

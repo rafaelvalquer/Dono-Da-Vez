@@ -1,5 +1,6 @@
 package app.donodavez.property
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,8 +10,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -24,6 +28,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -33,6 +38,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -43,10 +52,13 @@ import app.donodavez.core.LocalAppContainer
 import app.donodavez.core.location.Geo
 import app.donodavez.core.model.LatLonDto
 import app.donodavez.core.model.Money
+import app.donodavez.core.model.OpeningBonusDto
 import app.donodavez.core.model.PropertyDetailDto
 import app.donodavez.core.model.WalletDto
+import app.donodavez.core.ui.Avatars
 import app.donodavez.core.ui.Banner
 import app.donodavez.core.ui.BusyButton
+import app.donodavez.core.ui.CoinAmount
 import app.donodavez.core.ui.Countdown
 import app.donodavez.core.ui.ErrorBox
 import app.donodavez.core.ui.InfoLine
@@ -94,6 +106,50 @@ fun PropertySheet(
     }
 }
 
+/** Faixa do topo da ficha: gradiente na cor do estado, ícone da categoria, selo e valor principal. */
+@Composable
+private fun Header(
+    title: String,
+    subtitle: String?,
+    category: String?,
+    state: PropertyState,
+    valueLabel: String,
+    value: String?,
+) {
+    Column(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(Brush.linearGradient(listOf(state.color, state.shade)))
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(shape = CircleShape, color = Color.White, shadowElevation = 2.dp, modifier = Modifier.size(48.dp)) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(painterResource(Avatars.category(category)), contentDescription = null,
+                        tint = state.color, modifier = Modifier.size(28.dp))
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Color.White)
+                subtitle?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Color.White.copy(alpha = 0.9f)) }
+            }
+            Spacer(Modifier.width(8.dp))
+            StateBadge(state, onColor = true)
+        }
+        Surface(shape = RoundedCornerShape(16.dp), color = Color.White.copy(alpha = 0.18f)) {
+            Row(
+                Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(valueLabel, color = Color.White, style = MaterialTheme.typography.labelLarge, modifier = Modifier.weight(1f))
+                CoinAmount(value, style = MaterialTheme.typography.headlineSmall, iconSize = 26.dp, color = Color.White)
+            }
+        }
+    }
+}
+
 @Composable
 private fun ColumnScope.Content(
     d: PropertyDetailDto,
@@ -110,14 +166,21 @@ private fun ColumnScope.Content(
     val target = p.interactionPoint ?: LatLonDto(p.lat, p.lon)
     val distanceM = here?.let { Geo.distanceM(it.lat, it.lon, target.lat, target.lon) }
 
-    // Cabeçalho
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
-            Text(p.categoryName ?: categoryLabel(p.category), style = MaterialTheme.typography.titleLarge)
-            p.subtype?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
-        }
-        StateBadge(state)
+    val own = d.ownership
+    // Valor principal do cabeçalho (sai da lista abaixo para não repetir).
+    val headline: Pair<String, String?> = when {
+        own == null -> "Preço da categoria" to (d.actions.purchase.price ?: d.referencePrice)
+        own.isMine -> "Valor pago" to own.purchasePrice
+        else -> "Último valor pago" to own.purchasePrice
     }
+    Header(
+        title = p.categoryName ?: categoryLabel(p.category),
+        subtitle = p.subtype,
+        category = p.category,
+        state = state,
+        valueLabel = headline.first,
+        value = headline.second,
+    )
     Text(addressLabel(p.addressLabel))
     if (distanceM != null) {
         val near = distanceM <= radius
@@ -132,8 +195,12 @@ private fun ColumnScope.Content(
         }
     }
     if (p.eligibility != "eligible") Banner(eligibilityLabel(p.eligibility, p.eligibilityReason))
-    if (p.classificationStatus != "resolved") {
-        Text("Categoria em revisão: o preço pode ser ajustado antes da liberação.", style = MaterialTheme.typography.bodySmall)
+    when (p.classificationStatus) {
+        "resolved" -> Unit
+        // Regras v2 do importador: o mapa não informa o uso; altura e tamanho estimam a categoria.
+        "inferred" -> Text("Categoria estimada pela altura e pelo tamanho do prédio (o mapa não informa o uso).",
+            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else -> Text("Categoria em revisão: o preço pode ser ajustado antes da liberação.", style = MaterialTheme.typography.bodySmall)
     }
     if (p.heightSource != null && p.heightSource != "source") {
         Text("Altura do modelo 3D ilustrativa (estimada a partir de andares ou padrão da categoria).",
@@ -143,18 +210,20 @@ private fun ColumnScope.Content(
     HorizontalDivider()
 
     // Dono e renda
-    val own = d.ownership
     when {
         own == null -> {
             Text("Sem dono", fontWeight = FontWeight.SemiBold)
-            MoneyLine("Preço da categoria", d.actions.purchase.price ?: d.referencePrice, emphasize = true)
             MoneyLine("Renda por dia", d.actions.purchase.dailyIncome ?: Money.dailyIncome(d.referencePrice, d.dailyIncomeRate))
+            d.actions.purchase.openingBonus?.let { OpeningBonusOffer(it) }
         }
         own.isMine -> {
             Text("Este imóvel é seu desde ${formatDateTime(own.acquiredAt)}", fontWeight = FontWeight.SemiBold)
-            MoneyLine("Valor pago", own.purchasePrice)
             MoneyLine("Renda por dia", own.ownerDailyIncome)
             d.mine?.let { mine ->
+                mine.openingBonus?.let { b ->
+                    MoneyLine("Bônus de inauguração por dia", b.daily)
+                    Countdown("Inauguração termina em", b.until, c.clock)
+                }
                 MoneyLine("Acumulado", mine.accrued, decimals = 4)
                 MoneyLine("Disponível para coletar", mine.collectable, emphasize = true)
                 val canCollect = Money.parse(mine.collectable).signum() > 0
@@ -169,7 +238,6 @@ private fun ColumnScope.Content(
         }
         else -> {
             Text("Dono: ${own.ownerNickname ?: "jogador"}", fontWeight = FontWeight.SemiBold)
-            MoneyLine("Último valor pago", own.purchasePrice, emphasize = true)
             MoneyLine("Renda por dia do dono", own.ownerDailyIncome)
             own.protectedUntil?.let { Countdown("Protegido por mais", it, c.clock) }
         }
@@ -268,6 +336,18 @@ private fun ColumnScope.Content(
     p.region?.attribution?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline) }
 }
 
+/** Bônus de inauguração que uma compra do sistema receberia agora (o servidor grava o valor na compra). */
+@Composable
+private fun OpeningBonusOffer(b: OpeningBonusDto) {
+    MoneyLine("Bônus de inauguração por dia", b.daily)
+    val period = PropertyRules.openingBonusPeriod(b.seconds)
+    Text(
+        if (period == null) "Renda extra por tempo limitado após a compra; depois fica só a renda por dia."
+        else "Renda extra $period após a compra; depois fica só a renda por dia.",
+        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
+
 @Composable
 private fun PurchaseConfirm(d: PropertyDetailDto, wallet: WalletDto?, action: ActionUi, vm: PropertyViewModel) {
     var consent by rememberSaveable { mutableStateOf(false) }
@@ -277,6 +357,7 @@ private fun PurchaseConfirm(d: PropertyDetailDto, wallet: WalletDto?, action: Ac
     MoneyLine("Preço", price, emphasize = true)
     MoneyLine("Seu saldo disponível", wallet?.available)
     MoneyLine("Renda por dia após a compra", d.actions.purchase.dailyIncome)
+    d.actions.purchase.openingBonus?.let { OpeningBonusOffer(it) }
     if (!enough) Text("Saldo disponível insuficiente.", color = MaterialTheme.colorScheme.error)
     ConsentRow(consent, "Confirmo a compra. Vou validar minha localização agora (preciso estar a até 80 m).") { consent = it }
     BusyButton("Confirmar compra", busy = action.busy, enabled = consent && enough, onClick = vm::purchase)

@@ -7,10 +7,12 @@ alter role dv_admin_backend login password 'dv_admin_local';
 alter role dv_importer login password 'dv_importer_local';
 
 -- Configuração local: GPS simulado permitido e aprovação automática de lotes.
+-- Próxima versão a partir da vigente (não da v1), para manter o que as migrações publicaram depois
+-- (ex.: bônus de inauguração na versão 2).
 insert into game.game_config (version, values, note)
-select 2, (values - '_version') || '{"allow_mock_location": true}'::jsonb, 'local: GPS simulado permitido'
-  from game.game_config where version = 1
-on conflict (version) do nothing;
+select (select max(version) + 1 from game.game_config),
+       (game.cfg() - '_version') || '{"allow_mock_location": true}'::jsonb, 'local: GPS simulado permitido'
+ where not exists (select 1 from game.game_config where note = 'local: GPS simulado permitido');
 
 -- Segredos para o pg_cron chamar a outbox-worker local.
 do $$

@@ -41,8 +41,39 @@ def test_mixed_commercial_subtypes_have_no_single_subtype():
 def test_ambiguous_cases_are_not_tradeable():
     assert classify_building({"building": "yes"}, [], 100.0).status == "undefined"
     assert classify_building({"building": "residential"}, [], 100.0).status == "residential_undefined"
+    assert classify_building({"building": "yes", "height": "40"}, [], 400.0).status == "undefined"  # alto sem uso
+    assert classify_building({"building": "yes", "height": "5"}, [], 300.0).status == "undefined"   # térreo grande
+    assert classify_building({"building": "yes", "height": "5"}, [], 30.0).status == "undefined"    # pequeno demais
+    assert classify_building({"building": "yes", "height": "1"}, [], 100.0).status == "undefined"   # altura implausível
     mixed = classify_building({"building": "apartments"}, [LinkedPoi({"shop": "convenience"}, "inside")], 400.0)
     assert (mixed.category, mixed.status) == (None, "mixed_use_pending")
+
+
+def test_low_building_with_house_area_is_an_inferred_house():
+    one = classify_building({"building": "yes", "height": "4.5"}, [], 100.0)
+    two = classify_building({"building": "yes", "building:levels": "2"}, [], 100.0)
+    near = classify_building({"building": "yes", "height": "3"}, [], 140.0)
+    by_height = classify_building({"building": "residential", "height": "7"}, [], 90.0)
+    assert (one.category, one.status, one.confidence) == ("house_small", "inferred", 0.55)
+    assert two.category == "house_large"  # 200 m² construídos
+    assert (near.category, near.confidence) == ("house_small", 0.5)
+    assert (by_height.category, by_height.status) == ("house_large", "inferred")  # 7 m ≈ 2 andares
+    assert classify_building({"building": "yes", "building:levels": "3"}, [], 100.0).status == "undefined"
+
+
+def test_tall_residential_is_an_inferred_building_only_when_declared_residential():
+    c = classify_building({"building": "residential", "building:levels": "8", "building:flats": "32"}, [], 400.0)
+    assert (c.category, c.status, c.confidence, c.units) == ("residential_building", "inferred", 0.6, 32)
+    assert classify_building({"building": "residential", "height": "20"}, [], 120.0).status == "residential_undefined"
+    assert classify_building({"building": "residential", "height": "10"}, [], 300.0).status == "residential_undefined"
+
+
+def test_declared_use_wins_over_inference():
+    shop = classify_building({"building": "yes", "height": "4"}, [LinkedPoi({"shop": "bakery"}, "inside")], 100.0)
+    assert (shop.category, shop.status) == ("commercial", "resolved")
+    mixed = classify_building({"building": "residential", "height": "4"}, [LinkedPoi({"shop": "bakery"}, "inside")], 100.0)
+    assert mixed.status == "mixed_use_pending"
+    assert classify_building({"building": "house", "height": "4"}, [], 100.0).status == "resolved"
 
 
 def test_out_of_scope_buildings_are_rejected():

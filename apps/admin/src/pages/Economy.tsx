@@ -6,7 +6,7 @@ import { useLoad } from "../lib/hooks";
 
 type Metrics = {
   money_supply: string; total_issued: string; treasury: string; issued_today_income: string; issued_today_initial: string;
-  daily_income_run_rate: string; top10_income_share: number | null; owners: number; owned_properties: number;
+  daily_income_run_rate: string; opening_bonus_run_rate?: string; top10_income_share: number | null; owners: number; owned_properties: number;
   trades: Record<string, number> | null; avg_voluntary_price_ratio: number | null; active_players: number; new_players: number;
   risk_signals: number; risk_reviews_pending: number; pair_cycles: number;
 };
@@ -47,6 +47,9 @@ export function Economy() {
               { key: "income", label: "Renda emitida", numeric: true, render: (d) => money(d.metrics.issued_today_income) },
               { key: "initial", label: "Saldo inicial", numeric: true, render: (d) => money(d.metrics.issued_today_initial) },
               { key: "run", label: "Renda/dia (taxa)", numeric: true, render: (d) => money(d.metrics.daily_income_run_rate) },
+              // Bônus de inauguração ativo no fim do dia (some sozinho após 7 dias; relatórios antigos não têm o campo).
+              { key: "bonus", label: "Bônus/dia (inauguração)", numeric: true,
+                render: (d) => (d.metrics.opening_bonus_run_rate == null ? "—" : money(d.metrics.opening_bonus_run_rate)) },
               { key: "top10", label: "Top 10 renda", numeric: true, render: (d) => pct(d.metrics.top10_income_share) },
               { key: "owned", label: "Imóveis com dono", numeric: true, render: (d) => d.metrics.owned_properties },
               { key: "trades", label: "Negociações", render: (d) => Object.entries(d.metrics.trades ?? {}).map(([k, n]) => `${k}: ${n}`).join(" · ") || "—" },

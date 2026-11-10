@@ -34,4 +34,12 @@ class PropertyRulesTest {
         assertNotNull(PropertyRules.offerError("2000.01", "2000.00"))
         assertNull(PropertyRules.offerError("2000", "2000.00"))
     }
+
+    @Test fun openingBonusPeriod() {
+        assertEquals("nos 7 primeiros dias", PropertyRules.openingBonusPeriod(604_800))
+        assertEquals("no primeiro dia", PropertyRules.openingBonusPeriod(86_400))
+        assertEquals("nas 36 primeiras horas", PropertyRules.openingBonusPeriod(129_600))
+        assertNull(PropertyRules.openingBonusPeriod(0))
+        assertNull(PropertyRules.openingBonusPeriod(null))
+    }
 }

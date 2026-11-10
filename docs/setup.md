@@ -28,8 +28,8 @@ tiles, chave de assinatura Android) e não podem ser automatizados pelo reposit�
 ## 2. Projetos Supabase [conta]
 
 Crie **dois projetos separados** (homologação e produção) na conta existente; não reutilize tabelas de outro
-produto. Registre os `project ref` como variáveis do repositório (`SUPABASE_PROJECT_REF_STAGING`,
-`SUPABASE_PROJECT_REF_PROD`).
+produto. Registre cada `project ref` como variável `SUPABASE_PROJECT_REF` do *environment* correspondente no GitHub
+(`staging` e `production`; ver seção 7).
 
 Para cada projeto:
 
@@ -75,8 +75,10 @@ Para cada projeto:
 
 1. Crie um projeto Firebase por ambiente e registre o app Android com os IDs
    `app.donodavez.staging` e `app.donodavez`.
-2. Baixe `google-services.json` para `apps/android/app/src/<flavor>/google-services.json` (ignorado pelo git).
-   Sem o arquivo o app compila e funciona sem push.
+2. O app não usa `google-services.json`: as opções do Firebase entram como propriedades do Gradle por flavor
+   (`dvStagingFirebaseProjectId`, `dvStagingFirebaseAppId`, `dvStagingFirebaseApiKey`, `dvStagingFirebaseSenderId`
+   e os equivalentes `dvProd…`), em `~/.gradle/gradle.properties` ou como `ORG_GRADLE_PROJECT_*` no CI. São valores
+   públicos do app. Sem eles o app compila e funciona sem push.
 3. Gere uma chave de conta de serviço com o papel *Firebase Cloud Messaging API Admin* e salve o JSON em
    `FCM_SERVICE_ACCOUNT_JSON`. Sem ela o worker registra o push em log (modo simulado).
 
@@ -94,10 +96,12 @@ Valide em aparelho Android real: 45° de inclinação, extrusão e ≥ 30 FPS.
 ## 5. Assinatura Android [conta]
 
 1. Gere o keystore de upload (fora do repositório) e ative o Play App Signing.
-2. Secrets do CI: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
-   `ANDROID_KEY_PASSWORD`. O workflow `deploy.yml` decodifica o keystore em tempo de build.
-3. Localmente: `~/.gradle/gradle.properties` com `DV_KEYSTORE_FILE`, `DV_KEYSTORE_PASSWORD`, `DV_KEY_ALIAS`,
-   `DV_KEY_PASSWORD`.
+2. Secrets do CI (por environment): `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`,
+   `ANDROID_KEY_PASSWORD`. O workflow `deploy.yml` decodifica o keystore em um arquivo temporário, gera o AAB
+   assinado e apaga o arquivo.
+3. Localmente, o build lê variáveis de ambiente: `DV_UPLOAD_KEYSTORE` (caminho do .jks),
+   `DV_UPLOAD_KEYSTORE_PASSWORD`, `DV_UPLOAD_KEY_ALIAS` e `DV_UPLOAD_KEY_PASSWORD`. Sem `DV_UPLOAD_KEYSTORE` o release
+   sai sem assinatura de upload.
 
 ## 6. Região piloto [conta/decisão]
 
@@ -105,14 +109,34 @@ Valide em aparelho Android real: 45° de inclinação, extrusão e ≥ 30 FPS.
 polígono antes de publicar. Fluxo: importação → status `qa` → teste de campo com dois aparelhos e contas
 distintas → `released` pelo painel.
 
-## 7. Segredos do CI (GitHub)
+## 7. CI e implantação (GitHub)
+
+`ci.yml` não precisa de nenhum secret: roda tudo em PGlite ou na pilha local do Supabase CLI dentro do runner.
+`deploy.yml` e `import.yml` usam dois *environments*, `staging` e `production`. Em `production`, configure
+*required reviewers* para que toda implantação e importação espere aprovação manual.
+
+Secret do repositório:
 
 | Secret | Uso |
 |---|---|
-| `SUPABASE_ACCESS_TOKEN` | CLI para `db push` e deploy de funções |
-| `SUPABASE_DB_PASSWORD_STAGING` / `_PROD` | `supabase link` |
-| `DV_IMPORTER_DB_URL_STAGING` / `_PROD` | workflow de importação |
-| `ANDROID_*` | assinatura (ver acima) |
-| `GOOGLE_SERVICES_JSON_STAGING` / `_PROD` | build com push |
+| `SUPABASE_ACCESS_TOKEN` | CLI para `supabase link`, `db push` e deploy de funções |
 
-Produção usa *environments* do GitHub com aprovação manual.
+Secrets por environment:
+
+| Secret | Uso |
+|---|---|
+| `SUPABASE_DB_PASSWORD` | `supabase link` |
+| `DV_IMPORTER_DB_URL` | `import.yml` (precisa usar o papel `dv_importer`, o workflow confere) |
+| `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD` | AAB assinado |
+
+Variáveis por environment (valores públicos):
+
+| Variável | Uso |
+|---|---|
+| `SUPABASE_PROJECT_REF`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` | link, saúde da API, app e painel |
+| `MAP_STYLE_URL`, `MAP_PUBLIC_KEY` | mapa base do app |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_APP_ID`, `FIREBASE_API_KEY`, `FIREBASE_SENDER_ID` | push no app |
+| `ADMIN_API_URL` | painel (opcional; padrão `<SUPABASE_URL>/functions/v1/admin`) |
+
+Os artefatos do deploy (AAB e `dist/` do painel) ficam no run; envio à Play Store e hospedagem do painel são
+etapas da equipe.

@@ -11,6 +11,7 @@
   "property_id": "22222222-0000-4000-8000-000000000001",
   "purchase_price": "1000.00",
   "daily_income": "10.00",
+  "opening_bonus": { "daily": "40.00", "until": "2026-11-10T15:00:05.118Z" },
   "acquired_at": "2026-11-03T15:00:05.118Z",
   "wallet": { "balance": "4000.00", "reserved": "0.00", "available": "4000.00", "frozen": false },
   "correlation_id": "0b8f6a52-6f1e-4c7b-9d4f-2a1e3c5b0001"

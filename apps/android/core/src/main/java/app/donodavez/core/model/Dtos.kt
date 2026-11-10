@@ -162,10 +162,22 @@ data class OwnershipDto(
     @SerialName("protected_until") val protectedUntil: String? = null,
 )
 
+/**
+ * Bônus de inauguração: renda extra por dia nos primeiros dias de uma compra do sistema. Em uma titularidade
+ * vem com `until`; na oferta de compra (`actions.purchase`) vem com a duração em `seconds`.
+ */
+@Serializable
+data class OpeningBonusDto(
+    val daily: String,
+    val until: String? = null,
+    val seconds: Long? = null,
+)
+
 @Serializable
 data class MineDto(
     val accrued: String = "0.00",
     val collectable: String = "0.00",
+    @SerialName("opening_bonus") val openingBonus: OpeningBonusDto? = null,
     @SerialName("pending_offers") val pendingOffers: Int = 0,
 )
 
@@ -179,6 +191,7 @@ data class ActionInfoDto(
     @SerialName("eligible_until") val eligibleUntil: String? = null,
     @SerialName("requires_presence") val requiresPresence: Boolean = true,
     val reason: String? = null,
+    @SerialName("opening_bonus") val openingBonus: OpeningBonusDto? = null,
 )
 
 @Serializable
@@ -245,6 +258,7 @@ data class OperationResultDto(
     @SerialName("property_id") val propertyId: String? = null,
     @SerialName("purchase_price") val purchasePrice: String? = null,
     @SerialName("daily_income") val dailyIncome: String? = null,
+    @SerialName("opening_bonus") val openingBonus: OpeningBonusDto? = null,
     @SerialName("acquired_at") val acquiredAt: String? = null,
     val proposal: ProposalDto? = null,
     val wallet: WalletDto? = null,
@@ -262,6 +276,7 @@ data class PortfolioItemDto(
     val accrued: String = "0.00",
     val collectable: String = "0.00",
     @SerialName("income_credited") val incomeCredited: String = "0.00",
+    @SerialName("opening_bonus") val openingBonus: OpeningBonusDto? = null,
     @SerialName("pending_offers") val pendingOffers: Int = 0,
     val property: PropertySummaryDto,
 )
@@ -270,6 +285,7 @@ data class PortfolioItemDto(
 data class PortfolioTotalsDto(
     val count: Int = 0,
     @SerialName("daily_income") val dailyIncome: String = "0.00",
+    @SerialName("opening_bonus_daily") val openingBonusDaily: String = "0.00",
     val collectable: String = "0.00",
     val invested: String = "0.00",
 )

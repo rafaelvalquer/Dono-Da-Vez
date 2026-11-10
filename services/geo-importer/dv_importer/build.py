@@ -10,6 +10,7 @@ from typing import Any
 import shapely
 from shapely.geometry.base import BaseGeometry
 
+from .annex import absorb_annexes, is_annex_candidate
 from .classify import Classification, LinkedPoi, classify_building, classify_poi
 from .config import (ENTRANCE_MAX_DISTANCE_M, MAX_BUILDING_AREA_M2, MIN_BUILDING_AREA_M2, OVERLAP_RATIO,
                      POI_LINK_MAX_DISTANCE_M, RULES_VERSION, VISUAL_MODEL)
@@ -19,7 +20,8 @@ from .normalize import address_label, height_for, kept_tags
 
 
 def _eligibility(cls: Classification, quality: str, overlapping: bool) -> tuple[str, str | None]:
-    if cls.status != "resolved" or cls.category is None:
+    # "inferred": categoria estimada pelo formato; negociável, e a ficha avisa que é uma estimativa.
+    if cls.status not in ("resolved", "inferred") or cls.category is None:
         return "pending_classification", cls.status
     if overlapping:
         return "under_review", "overlapping_geometry"
@@ -28,36 +30,11 @@ def _eligibility(cls: Classification, quality: str, overlapping: bool) -> tuple[
     return "eligible", None
 
 
-def build(ex: Extracted, region: BaseGeometry) -> BuildResult:
-    center = region.centroid
-    proj = LocalProjection(center.x, center.y)
-    shapely.prepare(region)
-    rejects: list[Reject] = list(ex.rejects)
-
-    def in_region(g: BaseGeometry) -> bool:
-        return region.contains(g.representative_point())
-
-    # 1. Construções dentro da região, com área plausível.
-    buildings: list[tuple[Building, BaseGeometry, float]] = []
-    outside = 0
-    for b in sorted(ex.buildings, key=lambda x: x.ref.key):
-        if not in_region(b.geom):
-            outside += 1
-            continue
-        fp_m = proj.to_m(b.geom)
-        area = fp_m.area
-        if area < MIN_BUILDING_AREA_M2:
-            rejects.append(Reject(b.ref.key, "too_small", {"area_m2": round(area, 1)}))
-            continue
-        if area > MAX_BUILDING_AREA_M2:
-            rejects.append(Reject(b.ref.key, "too_large", {"area_m2": round(area, 1)}))
-            continue
-        buildings.append((b, fp_m, area))
-
-    fps_m = [fp for _, fp, _ in buildings]
-    tree = shapely.STRtree(fps_m) if fps_m else None
+def _locator(items: list[tuple[Building, BaseGeometry, float]]):
+    """Procura a construção dona de um ponto: vértice explícito → contenção → proximidade."""
+    tree = shapely.STRtree([fp for _, fp, _ in items]) if items else None
     vertex_owner: dict[int, int] = {}
-    for i, (b, _, _) in enumerate(buildings):
+    for i, (b, _, _) in enumerate(items):
         for nid in sorted(b.node_ids):
             vertex_owner.setdefault(nid, i)
 
@@ -74,20 +51,75 @@ def build(ex: Extracted, region: BaseGeometry) -> BuildResult:
             return int(near[0]), "near"
         return None, None
 
-    # 2. Vínculos: POIs comerciais (contenção, vértice explícito ou proximidade), entradas e endereços.
-    linked: dict[int, list[tuple[PointFeature, str]]] = defaultdict(list)
+    return owner_of, tree
+
+
+def build(ex: Extracted, region: BaseGeometry) -> BuildResult:
+    center = region.centroid
+    proj = LocalProjection(center.x, center.y)
+    shapely.prepare(region)
+    rejects: list[Reject] = list(ex.rejects)
+
+    def in_region(g: BaseGeometry) -> bool:
+        return region.contains(g.representative_point())
+
+    # 1. Construções dentro da região, com área plausível.
+    found: list[tuple[Building, BaseGeometry, float]] = []
+    outside = 0
+    for b in sorted(ex.buildings, key=lambda x: x.ref.key):
+        if not in_region(b.geom):
+            outside += 1
+            continue
+        fp_m = proj.to_m(b.geom)
+        area = fp_m.area
+        if area > MAX_BUILDING_AREA_M2:
+            rejects.append(Reject(b.ref.key, "too_large", {"area_m2": round(area, 1)}))
+            continue
+        found.append((b, fp_m, area))
+
+    # 1b. POIs: vinculados às construções como vieram do mapa, antes de juntar anexos. Assim quem tem loja vinculada
+    # (dentro, num vértice ou a poucos metros) nunca vira anexo, e o contorno maior de um vizinho não leva a loja.
+    original = [it for it in found if it[2] >= MIN_BUILDING_AREA_M2]
+    poi_owner, _ = _locator(original)
+    poi_links: dict[str, list[tuple[PointFeature, str]]] = defaultdict(list)
     standalone: list[PointFeature] = []
     link_stats: Counter[str] = Counter()
     for p in sorted(ex.pois, key=lambda x: x.ref.key):
         if not in_region(p.geom):
             continue
-        i, how = owner_of(p, proj.to_m(p.geom), POI_LINK_MAX_DISTANCE_M)
+        i, how = poi_owner(p, proj.to_m(p.geom), POI_LINK_MAX_DISTANCE_M)
         if i is None:
             standalone.append(p)
         else:
-            linked[i].append((p, how or "inside"))
+            poi_links[original[i][0].ref.key].append((p, how or "inside"))
             link_stats[how or "inside"] += 1
 
+    # 1c. Anexos (edícula, garagem, puxadinho): pedaço pequeno encostado num prédio maior vira parte dele.
+    # Pedaço com POI nunca é absorvido: um quiosque continua sendo um imóvel próprio.
+    poi_nodes = {p.ref.source_id for p in ex.pois if p.ref.object_type == "node"}
+    poi_pts = [proj.to_m(p.geom) for p in sorted(ex.pois, key=lambda x: x.ref.key)]
+    poi_tree = shapely.STRtree(poi_pts) if poi_pts else None
+    items: list[tuple[Building, BaseGeometry, float]] = []
+    with_poi: set[int] = set()
+    for b, fp_m, area in found:
+        has_poi = b.ref.key in poi_links or bool(poi_nodes & b.node_ids) or (
+            poi_tree is not None and len(poi_tree.query(fp_m, predicate="contains")) > 0)
+        if area < MIN_BUILDING_AREA_M2 and not is_annex_candidate(b, area, has_poi):
+            rejects.append(Reject(b.ref.key, "too_small", {"area_m2": round(area, 1)}))
+            continue
+        if has_poi:
+            with_poi.add(len(items))
+        items.append((b, fp_m, area))
+    pieces, annex_rejects, annex_counts = absorb_annexes(items, with_poi)
+    rejects.extend(annex_rejects)
+    buildings = [(pc.building, pc.fp_m, pc.area) for pc in pieces]
+    linked: dict[int, list[tuple[PointFeature, str]]] = {
+        i: poi_links[pc.building.ref.key] for i, pc in enumerate(pieces) if pc.building.ref.key in poi_links}
+
+    fps_m = [fp for _, fp, _ in buildings]
+    owner_of, tree = _locator(buildings)
+
+    # 2. Vínculos das peças finais: entradas e endereços.
     entrances: dict[int, list[tuple[PointFeature, BaseGeometry, bool]]] = defaultdict(list)
     for e in sorted(ex.entrances, key=lambda x: x.ref.key):
         em = proj.to_m(e.geom)
@@ -123,12 +155,15 @@ def build(ex: Extracted, region: BaseGeometry) -> BuildResult:
     for i, (b, fp_m, area) in enumerate(buildings):
         pois = linked.get(i, [])
         cls = classify_building(b.tags, [LinkedPoi(p.tags, how) for p, how in pois], area)
+        parts = pieces[i].parts
         if isinstance(cls, str):
             rejects.append(Reject(b.ref.key, cls, {"building": b.tags.get("building")}))
+            rejects.extend(Reject(a.ref.key, cls, {"part_of": b.ref.key}) for a in parts)
             continue
         ip_m, quality, entrance_ref = interaction_point(fp_m, entrances.get(i, []), street_tree, streets_m)
 
-        refs: list[SourceRef] = [b.ref] + [p.ref.with_role("poi") for p, _ in pois]
+        # Anexos ficam registrados como "part": o imóvel mantém a identidade do prédio principal.
+        refs: list[SourceRef] = [b.ref] + [a.ref.with_role("part") for a in parts]             + [p.ref.with_role("poi") for p, _ in pois]
         if entrance_ref is not None:
             refs.append(entrance_ref)
         label = address_label(b.tags)
@@ -163,7 +198,8 @@ def build(ex: Extracted, region: BaseGeometry) -> BuildResult:
             units_count=cls.units,
             eligibility=elig,
             eligibility_reason=reason,
-            source_tags={"building": kept_tags(b.tags), "pois": [kept_tags(p.tags) for p, _ in pois]},
+            source_tags={"building": kept_tags(b.tags), "pois": [kept_tags(p.tags) for p, _ in pois]}
+            | ({"parts": len(parts)} if parts else {}),
         ))
 
     ignored_pois = 0
@@ -201,6 +237,7 @@ def build(ex: Extracted, region: BaseGeometry) -> BuildResult:
         "with_address": with_address,
         "repaired_geometries": repaired,
         "overlapping": len(overlapping),
+        **annex_counts,
         "pois_linked": dict(sorted(link_stats.items())),
         "pois_standalone": len(standalone) - ignored_pois,
         "pois_ignored": ignored_pois,

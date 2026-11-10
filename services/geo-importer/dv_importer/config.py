@@ -1,6 +1,6 @@
 """Regras determinísticas versionadas. Alterar qualquer valor aqui exige incrementar RULES_VERSION."""
 
-RULES_VERSION = 1
+RULES_VERSION = 2
 PROVIDER = "osm"
 
 # Porte de casas: área construída estimada = área do footprint × pavimentos (padrão 1).
@@ -18,6 +18,26 @@ OVERLAP_RATIO = 0.5
 METERS_PER_LEVEL = 3.0
 MIN_HEIGHT_M = 2.0
 MAX_HEIGHT_M = 600.0
+
+# Regras v2 — categoria estimada pelo formato quando o OSM não declara o uso (classification_status "inferred").
+# Quase todo prédio de São Paulo no OSM é building=yes com altura medida: altura e área bastam para
+# reconhecer casas térreas/sobrados. A ficha avisa que a categoria é uma estimativa.
+LOW_RISE_MAX_HEIGHT_M = 8.0          # até 2 andares
+TALL_MIN_HEIGHT_M = 14.0             # 5 andares ou mais
+INFERRED_HOUSE_MIN_AREA_M2 = 40.0
+INFERRED_HOUSE_MAX_AREA_M2 = 250.0   # térreo maior que isso costuma ser galpão, loja ou garagem
+INFERRED_BUILDING_MIN_AREA_M2 = 150.0
+INFERRED_CONFIDENCE = 0.55
+INFERRED_NEAR_LIMIT_CONFIDENCE = 0.5
+INFERRED_BUILDING_CONFIDENCE = 0.6
+
+# Anexos: pedaço pequeno sem uso declarado (edícula, garagem, puxadinho) encostado num prédio maior vira parte
+# dele; pedaços pequenos encostados só entre si viram um imóvel se juntos tiverem área suficiente.
+ANNEX_MAX_AREA_M2 = 40.0
+ANNEX_TOUCH_DISTANCE_M = 1.0
+ANNEX_GROUP_MAX_PARTS = 10
+ANNEX_GROUP_MIN_AREA_M2 = 40.0
+ANNEX_BUILDINGS = {"yes", "garage", "garages", "shed", "carport", "roof"}
 
 DEFAULT_HEIGHT_M = {
     "house_small": 6.0,

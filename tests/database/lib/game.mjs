@@ -146,10 +146,11 @@ export class Game {
   }
 
   // --- Relógio simulado -----------------------------------------------------------------------
-  /** Recua a renda acumulada de uma titularidade em `hours` (equivale a passar o tempo). */
+  /** Recua a renda acumulada de uma titularidade em `hours` (equivale a passar o tempo, inclusive na inauguração). */
   async ageOwnership(ownershipId, hours) {
     await this.q(`update game.ownerships set acquired_at = acquired_at - make_interval(hours => $2::int),
-                    income_checkpoint_at = income_checkpoint_at - make_interval(hours => $2::int) where id = $1`, [ownershipId, hours]);
+                    income_checkpoint_at = income_checkpoint_at - make_interval(hours => $2::int),
+                    opening_bonus_until = opening_bonus_until - make_interval(hours => $2::int) where id = $1`, [ownershipId, hours]);
   }
 
   /** Faz a proposta vencer agora (prazo de resposta esgotado). */

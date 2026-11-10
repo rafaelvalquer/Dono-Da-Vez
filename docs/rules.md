@@ -12,10 +12,18 @@ Parâmetros vivem em `game.game_config` (versões imutáveis; nova versão via p
 | Comércio | 3000.00 |
 | Prédio residencial (o prédio inteiro é um imóvel) | 10000.00 |
 | Rendimento | 1% ao dia sobre o **preço efetivamente pago**, contínuo e proporcional ao tempo |
+| Bônus de inauguração (versão 2) | +4% ao dia nos **7 primeiros dias** de cada **compra do sistema**, somado ao 1% |
 | Precisão | `numeric(24,8)`; JSON sempre em string; ofertas com no máximo 2 casas |
 
 - Não existe job que credita 1% ao dia: o acumulado é calculado sob demanda e só vira saldo ao coletar
   (centavos inteiros; a fração continua acumulando) ou ao vender (liquidado até o segundo da transferência).
+- O bônus de inauguração fica gravado na titularidade no momento da compra (`opening_bonus_rate` e
+  `opening_bonus_until` em `game.ownerships`, a partir de `opening_bonus_rate`/`opening_bonus_s` da versão da
+  configuração usada na compra). Venda aceita e compra sem aceite **não** recebem nem renovam o bônus; ao vender
+  durante a semana, o vendedor recebe o bônus acumulado até o segundo da transferência e o comprador fica só com 1%.
+  Mudar ou zerar o bônus numa nova versão vale apenas para compras futuras. Nas respostas, `daily_income` continua
+  sendo a renda permanente; o bônus vem à parte em `opening_bonus` (`{daily, until}`, ou `{daily, seconds}` na
+  oferta de compra).
 - Razão de partidas dobradas: cada transação soma zero (gatilho diferido); lançamentos são imutáveis.
   Emissão (saldo inicial e rendimento) sai da conta `issuance`; compras do sistema vão para `treasury`.
 

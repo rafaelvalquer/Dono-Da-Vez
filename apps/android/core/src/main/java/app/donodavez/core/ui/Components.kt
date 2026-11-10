@@ -1,5 +1,8 @@
 package app.donodavez.core.ui
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +14,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -27,12 +32,17 @@ import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.donodavez.core.R
 import app.donodavez.core.model.Money
 import app.donodavez.core.time.ServerClock
 import kotlinx.coroutines.delay
@@ -80,7 +90,7 @@ fun EmptyState(icon: ImageVector, text: String, modifier: Modifier = Modifier) {
 
 @Composable
 fun Banner(text: String, modifier: Modifier = Modifier, icon: ImageVector = Icons.Filled.ErrorOutline, action: String? = null, onAction: (() -> Unit)? = null) {
-    Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = modifier.fillMaxWidth()) {
+    Surface(color = MaterialTheme.colorScheme.secondaryContainer, shape = RoundedCornerShape(16.dp), modifier = modifier.fillMaxWidth()) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, contentDescription = null)
             Spacer(Modifier.width(8.dp))
@@ -99,14 +109,67 @@ fun OfflineBanner(savedAt: Long?) {
     )
 }
 
+/** Selo do estado (ícone + rótulo). [onColor] = sobre fundo colorido: pílula branca com texto na cor do estado. */
 @Composable
-fun StateBadge(state: PropertyState, modifier: Modifier = Modifier) {
-    Surface(color = state.color.copy(alpha = 0.14f), shape = MaterialTheme.shapes.small, modifier = modifier) {
-        Row(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+fun StateBadge(state: PropertyState, modifier: Modifier = Modifier, onColor: Boolean = false) {
+    Surface(color = if (onColor) Color.White else state.color.copy(alpha = 0.14f), shape = CircleShape, modifier = modifier) {
+        Row(Modifier.padding(horizontal = 10.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(state.icon, contentDescription = null, tint = state.color, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(4.dp))
-            Text(state.label, color = state.color, style = MaterialTheme.typography.labelMedium)
+            Text(state.label, color = state.color, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+/**
+ * Filtro por estado em formato de pílula: ativo = cheio na cor do estado, inativo = branco com ícone colorido.
+ * Mantém ícone e rótulo (nunca só cor) e expõe o estado selecionado para leitores de tela.
+ */
+@Composable
+fun StatePill(state: PropertyState, selected: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+    val bg by animateColorAsState(if (selected) state.color else Color.White.copy(alpha = 0.94f), label = "pill-bg")
+    val fg = if (selected) Color.White else state.color
+    Surface(
+        selected = selected,
+        onClick = onClick,
+        shape = CircleShape,
+        color = bg,
+        shadowElevation = if (selected) 4.dp else 2.dp,
+        border = if (selected) null else BorderStroke(1.dp, state.color.copy(alpha = 0.35f)),
+        modifier = modifier,
+    ) {
+        Row(Modifier.padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Icon(state.icon, contentDescription = null, tint = fg, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(5.dp))
+            Text(state.label, color = fg, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
+
+/** Moeda do jogo (arte original gerada por assets/tools/generate-assets.mjs). */
+@Composable
+fun CoinIcon(modifier: Modifier = Modifier, size: Dp = 20.dp) {
+    Image(painterResource(R.drawable.dv_coin), contentDescription = null, modifier = modifier.size(size))
+}
+
+/** Valor em moedas com o ícone da moeda; lido como "X moedas" por leitores de tela. */
+@Composable
+fun CoinAmount(
+    value: String?,
+    modifier: Modifier = Modifier,
+    style: TextStyle = MaterialTheme.typography.titleMedium,
+    iconSize: Dp = 20.dp,
+    color: Color = Color.Unspecified,
+    decimals: Int = 2,
+) {
+    val text = Money.format(value, decimals)
+    Row(
+        modifier.semantics(mergeDescendants = true) { contentDescription = "$text moedas" },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CoinIcon(size = iconSize)
+        Spacer(Modifier.width(6.dp))
+        Text(text, style = style, fontWeight = FontWeight.Bold, color = color)
     }
 }
 

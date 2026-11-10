@@ -6,7 +6,7 @@ type Tone = "neutral" | "good" | "warn" | "bad" | "info";
 const TONE_BY_VALUE: Record<string, Tone> = {
   active: "good", eligible: "good", released: "good", published: "good", approved: "good", resolved: "good",
   accepted: "good", completed: "good", sent: "good",
-  pending: "info", open: "warn", qa: "info", draft: "neutral", staged: "info", validated: "info", running: "info",
+  pending: "info", inferred: "info", open: "warn", qa: "info", draft: "neutral", staged: "info", validated: "info", running: "info",
   in_progress: "info", acknowledged: "info", under_review: "warn", pending_classification: "warn",
   suspended: "bad", frozen: "bad", failed: "bad", rejected: "bad", paused: "warn", closed: "neutral",
   cancelled: "neutral", expired: "neutral", superseded: "neutral", dismissed: "neutral",

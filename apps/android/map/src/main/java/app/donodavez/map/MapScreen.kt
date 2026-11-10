@@ -14,11 +14,13 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
@@ -33,10 +35,9 @@ import androidx.compose.material.icons.filled.ViewInAr
 import androidx.compose.material.icons.filled.ZoomIn
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -51,11 +52,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -70,6 +75,7 @@ import app.donodavez.core.net.DvJson
 import app.donodavez.core.ui.AvatarImage
 import app.donodavez.core.ui.Avatars
 import app.donodavez.core.ui.Banner
+import app.donodavez.core.ui.CoinAmount
 import app.donodavez.core.ui.EmptyState
 import app.donodavez.core.ui.ErrorBox
 import app.donodavez.core.ui.Loadable
@@ -77,6 +83,7 @@ import app.donodavez.core.ui.LoadingBox
 import app.donodavez.core.ui.OfflineBanner
 import app.donodavez.core.ui.PropertyState
 import app.donodavez.core.ui.StateBadge
+import app.donodavez.core.ui.StatePill
 import app.donodavez.core.ui.addressLabel
 import app.donodavez.core.ui.categoryLabel
 import app.donodavez.property.PropertySheet
@@ -162,6 +169,7 @@ fun MapScreen(
                 // O mapa-base possui POIs que não pertencem ao catálogo do jogo.
                 // Mantemos as ruas e os edifícios; os imóveis compráveis vêm de dv-*.
                 MapBaseStyleCleaner.hideUnrelatedPois(s)
+                ToyCityStyle.apply(s)
                 MapLayers.install(context, s, c.game.profile()?.avatarId)
                 style = s
             }
@@ -202,80 +210,115 @@ fun MapScreen(
         if (me == null) {
             MapLayers.setMe(s, null, null, null, radius); shown = null; return@LaunchedEffect
         }
+        // Seta de direção só em movimento (parado, o bearing do GPS é ruído).
+        val heading = me.bearing?.takeIf { (me.speedMps ?: 0f) >= MOVING_MPS }
         val from = shown?.takeIf { Geo.distanceM(it.first, it.second, me.lat, me.lon) < 300 } ?: (me.lat to me.lon)
         val steps = 12
         for (i in 1..steps) {
             val k = i / steps.toDouble()
             val lat = from.first + (me.lat - from.first) * k
             val lon = from.second + (me.lon - from.second) * k
-            MapLayers.setMe(s, lat, lon, me.accuracyM.toDouble(), radius)
+            MapLayers.setMe(s, lat, lon, me.accuracyM.toDouble(), radius, heading)
             shown = lat to lon
             if (i < steps) delay(50)
+        }
+    }
+
+    // Anel pulsante sob o jogador: dois pulsos a cada leitura nova do GPS e depois some (PlayerPulse), para o
+    // mapa 3D não redesenhar sem parar. ~30 fps pelo relógio de quadros; pausa quando a tela sai.
+    var pulseOrigin by remember { mutableStateOf<Long?>(null) }
+    LaunchedEffect(style, ui.me) {
+        val s = style ?: return@LaunchedEffect
+        if (ui.me == null) { pulseOrigin = null; return@LaunchedEffect }
+        val origin = withFrameNanos { now -> PlayerPulse.origin(pulseOrigin, now / 1_000_000L) }
+        pulseOrigin = origin
+        var last = 0L
+        var pulsing = true
+        while (pulsing) {
+            withFrameNanos { now ->
+                val phase = PlayerPulse.phase(now / 1_000_000L - origin)
+                if (phase == null || now - last >= 33_000_000L) {
+                    last = now
+                    MapLayers.setPulse(s, phase ?: 1f) // fase 1: anel invisível até a próxima leitura
+                    pulsing = phase != null
+                }
+            }
         }
     }
 
     Box(Modifier.fillMaxSize()) {
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
-        // Topo: saldo, notificações, filtros e avisos
-        Column(Modifier.fillMaxWidth().statusBarsPadding().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Surface(shape = RoundedCornerShape(24.dp), tonalElevation = 3.dp, shadowElevation = 3.dp) {
-                Row(Modifier.padding(start = 6.dp, end = 4.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                    AvatarImage(boot?.profile?.avatarId, size = 36.dp)
-                    Spacer(Modifier.width(8.dp))
-                    Column(Modifier.weight(1f).clickable(onClick = onOpenWallet)) {
-                        Text("${Money.format(wallet?.available)} moedas", fontWeight = FontWeight.Bold)
-                        val reserved = Money.parse(wallet?.reserved)
-                        Text(
-                            if (reserved.signum() > 0) "disponível · ${Money.format(reserved)} reservado" else "saldo disponível",
-                            style = MaterialTheme.typography.labelSmall,
-                        )
+        // Topo: cartão do jogador (avatar, saldo, notificações), filtros e avisos
+        Column(
+            Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(28.dp),
+                color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+                shadowElevation = 6.dp,
+            ) {
+                Row(Modifier.padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Surface(shape = CircleShape, color = Color.White, shadowElevation = 2.dp) {
+                        AvatarImage(boot?.profile?.avatarId, size = 44.dp)
                     }
-                    IconButton(onClick = onOpenNotifications) { Icon(Icons.Filled.Notifications, contentDescription = "Notificações") }
+                    Spacer(Modifier.width(10.dp))
+                    Column(
+                        Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable(onClick = onOpenWallet)
+                            .padding(horizontal = 4.dp, vertical = 2.dp),
+                    ) {
+                        Text(
+                            boot?.profile?.nickname ?: "Saldo disponível",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        )
+                        CoinAmount(wallet?.available, style = MaterialTheme.typography.titleLarge, iconSize = 22.dp)
+                        val reserved = Money.parse(wallet?.reserved)
+                        if (reserved.signum() > 0) {
+                            Text("${Money.format(reserved)} reservado em propostas",
+                                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    FilledTonalIconButton(onClick = onOpenNotifications, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Filled.Notifications, contentDescription = "Notificações")
+                    }
                 }
             }
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                PropertyState.entries.forEach { s ->
-                    FilterChip(
-                        selected = s in ui.filters,
-                        onClick = { vm.toggleFilter(s) },
-                        label = { Text(s.label) },
-                        leadingIcon = { Icon(s.icon, contentDescription = null, tint = s.color, modifier = Modifier.size(18.dp)) },
-                    )
-                }
+            Row(
+                Modifier.horizontalScroll(rememberScrollState()).padding(vertical = 2.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                PropertyState.entries.forEach { s -> StatePill(s, s in ui.filters, onClick = { vm.toggleFilter(s) }) }
             }
-            Surface(color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.92f),
-                shape = RoundedCornerShape(12.dp)) {
-                Row(Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Icon(Icons.Filled.Map, contentDescription = null, tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(16.dp))
-                    Text("SÃO PAULO  ·  EXPLORE E COMPRE",
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                }
-            }
-            if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (ui.loading) LinearProgressIndicator(Modifier.fillMaxWidth().clip(CircleShape))
             MapBanners(ui, offline, cfg.maxGpsAccuracyM, c.config.allowMockLocation, onRequestPermission, vm)
         }
 
-        // Ações do mapa
+        // Ações do mapa: botões redondos brancos e o de centralizar em destaque.
         Column(
-            Modifier.align(Alignment.BottomEnd).padding(end = 12.dp, bottom = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            horizontalAlignment = Alignment.End,
+            Modifier.align(Alignment.BottomEnd).navigationBarsPadding().padding(end = 14.dp, bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            SmallFloatingActionButton(onClick = { legend = true }) { Icon(Icons.Filled.Info, contentDescription = "Legenda do mapa") }
-            SmallFloatingActionButton(onClick = vm::toggleTopView) {
+            MapButton(onClick = { legend = true }) { Icon(Icons.Filled.Info, contentDescription = "Legenda do mapa") }
+            MapButton(onClick = vm::toggleTopView) {
                 if (ui.topView) Icon(Icons.Filled.ViewInAr, contentDescription = "Ver em 3D")
                 else Icon(Icons.Filled.Map, contentDescription = "Ver de cima")
             }
-            SmallFloatingActionButton(onClick = vm::openNearby) {
+            MapButton(onClick = vm::openNearby) {
                 Icon(Icons.AutoMirrored.Filled.List, contentDescription = "Imóveis ao alcance")
             }
-            FloatingActionButton(onClick = vm::recenter) {
-                Icon(if (ui.me == null) Icons.Filled.GpsOff else Icons.Filled.MyLocation, contentDescription = "Centralizar em mim")
+            FloatingActionButton(
+                onClick = vm::recenter,
+                shape = CircleShape,
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(64.dp),
+            ) {
+                Icon(if (ui.me == null) Icons.Filled.GpsOff else Icons.Filled.MyLocation,
+                    contentDescription = "Centralizar em mim", modifier = Modifier.size(28.dp))
             }
         }
     }
@@ -314,6 +357,18 @@ fun MapScreen(
         }
     }
     if (legend) LegendDialog(ui, radius) { legend = false }
+}
+
+@Composable
+private fun MapButton(onClick: () -> Unit, content: @Composable () -> Unit) {
+    SmallFloatingActionButton(
+        onClick = onClick,
+        shape = CircleShape,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        contentColor = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.size(48.dp),
+        content = content,
+    )
 }
 
 @Composable
@@ -394,12 +449,19 @@ private fun LegendDialog(ui: MapUi, radius: Int, onDismiss: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 PropertyState.entries.forEach { s ->
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(s.icon, contentDescription = null, tint = s.color)
-                        Spacer(Modifier.width(8.dp))
+                        Surface(shape = CircleShape, color = s.body, modifier = Modifier.size(26.dp)) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(s.icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
                         Text(s.label)
                     }
                 }
-                Text("Círculo verde tracejado: alcance de $radius m para negociar.")
+                Text("O sinal de + dos imóveis disponíveis aparece ao aproximar o mapa; de longe, o verde já indica.")
+                Text("Imóvel dourado: o que você selecionou.")
+                Text("Pin com o seu avatar: sua posição. O anel pulsa a cada nova leitura do GPS, e a seta no chão mostra a direção enquanto você anda.")
+                Text("Círculo tracejado verde-azulado: alcance de $radius m para negociar.")
                 Text("Círculo azul: precisão atual do GPS (quanto menor, melhor).")
                 Text("As alturas dos prédios em 3D são ilustrativas; quando o dado não existe, usamos andares ou um padrão da categoria.")
                 Text("Toque em um imóvel para ver a ficha. Se houver vários próximos, escolha na lista.")
@@ -412,3 +474,4 @@ private fun LegendDialog(ui: MapUi, radius: Int, onDismiss: () -> Unit) {
 }
 
 private const val TILT = 45.0
+private const val MOVING_MPS = 0.7f

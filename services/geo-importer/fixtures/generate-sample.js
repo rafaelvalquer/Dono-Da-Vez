@@ -40,6 +40,28 @@ rect(111, -140, 5, -125, 15, { building: "commercial" });
 node(-132.5, 10, { office: "company" }, 3004);
 rect(112, -50, 40, -20, 60, { building: "school", amenity: "school" });
 rect(113, -10, 40, 0, 46, { building: "garage" });
+// Regras v2: categoria estimada pela altura e área, e anexos pequenos juntados ao prédio vizinho.
+rect(114, 10, 30, 20, 42, { building: "yes", height: "5" });         // casa térrea estimada (120 m²)
+rect(115, 20, 32, 24, 37, { building: "yes" });                      // puxadinho encostado na 114
+rect(119, 12, 42, 16, 47, { building: "garage" });                   // garagem encostada na 114
+rect(116, 40, 30, 46, 35, { building: "yes", height: "4" });         // dois pedaços pequenos encostados:
+rect(117, 46, 30, 51, 34, { building: "yes" });                      //   juntos têm 50 m² e viram uma casa
+rect(118, 70, 60, 75, 65, { building: "yes" });                      // pedaço isolado: não vira imóvel
+rect(120, 90, 32, 95, 37, { building: "yes" });                      // quiosque com loja: nunca absorvido
+node(92.5, 34.5, { shop: "kiosk", name: "Banca Fixture" }, 3005);
+rect(121, 95, 30, 105, 40, { building: "yes", height: "6" });        // casa estimada (100 m²)
+rect(124, 105, 33, 108, 36, { building: "yes" });                    // anexo de 9 m² encostado na 121
+rect(125, 98, 40, 104, 45, { building: "yes", "addr:housenumber": "90" });  // encostada na 121, com número próprio:
+                                                                      //   é outra casa, nunca absorvida
+rect(126, 60, 40, 65, 45, { building: "yes" });                      // POI a 2 m do contorno: é uma loja, não anexo
+node(62, 47, { amenity: "fast_food", name: "Lanche Fixture" }, 3006);
+rect(127, 65, 40, 75, 50, { building: "yes", height: "5" });         // casa encostada na loja 126
+rect(130, -85, 30, -75, 40, { building: "yes", height: "5" });       // casa que junta o anexo 131
+rect(131, -75, 33, -72, 36, { building: "yes" });                    // anexo de 9 m² ao lado do POI 3007
+rect(128, -66, 30, -56, 40, { building: "yes" });                    // o POI 3007 é desta loja, não da casa 130
+node(-70, 34.5, { shop: "bakery", name: "Padaria Vizinha Fixture" }, 3007);
+rect(122, -100, 40, -88, 55, { building: "residential", height: "30" }); // prédio residencial estimado
+rect(123, 130, 30, 145, 45, { building: "yes", height: "40" });      // prédio alto sem uso: segue indefinido
 rect(201, 100, 5, 130, 25, {});
 rect(202, 110, 12, 120, 18, {});
 rels.push({ id: 5001, members: [["way", 201, "outer"], ["way", 202, "inner"]],
